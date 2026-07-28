@@ -82,6 +82,13 @@ import {
   type LongFormMemoryConfig,
   type MemoryContextPackage,
 } from "../story-system/index.js";
+import {
+  compileWritingContract,
+  ensureChapterSpec,
+  runStoryConvergence,
+  type CompiledWritingContract,
+} from "../story-spec/index.js";
+import { evaluateOutlineControl } from "../narrative-research/index.js";
 
 const SEQUENCE_LEVEL_CATEGORIES = new Set([
   "Pacing Monotony", "节奏单调",
@@ -1149,6 +1156,13 @@ export class PipelineRunner {
       externalContext,
       { reuseExistingIntentWhenContextMissing: false },
     );
+    await this.compileChapterWritingContract({
+      book,
+      bookDir,
+      chapterNumber,
+      intent: plan.intent,
+      memo: plan.memo,
+    });
 
     return {
       bookId,
@@ -1180,6 +1194,13 @@ export class PipelineRunner {
       externalContext,
       { reuseExistingIntentWhenContextMissing: true },
     );
+    await this.compileChapterWritingContract({
+      book,
+      bookDir,
+      chapterNumber,
+      intent: plan.intent,
+      memo: plan.memo,
+    });
 
     return {
       bookId,
@@ -2119,6 +2140,49 @@ export class PipelineRunner {
         totalUsage = PipelineRunner.addUsage(totalUsage, postGateAudit.tokenUsage);
         auditResult = postGateAudit;
         revised = true;
+      }
+    }
+
+    const compiledWritingContract = writeInput.compiledWritingContract;
+    if (compiledWritingContract) {
+      this.logStage(stageLanguage, {
+        zh: "执行 Story Convergence",
+        en: "running story convergence",
+      });
+      const outlineControl = evaluateOutlineControl({
+        content: finalContent,
+        beats: compiledWritingContract.activeBeatContracts,
+        allowedStateChanges: compiledWritingContract.chapterSpec.requiredStateChanges,
+      });
+      const convergence = await runStoryConvergence({
+        bookDir,
+        content: finalContent,
+        spec: compiledWritingContract.chapterSpec,
+        outlineControl,
+        gates: [
+          {
+            gate: "prose-quality",
+            passed: proseQualityResult.report.finalStatus !== "rejected",
+            blocking: true,
+            details: proseQualityResult.scan.issues
+              .filter((issue) => issue.severity === "blocking")
+              .map((issue) => issue.message),
+          },
+          {
+            gate: "continuity",
+            passed: !auditResult.parseFailed
+              && !auditResult.issues.some((issue) => issue.severity === "critical"),
+            blocking: true,
+            details: auditResult.issues
+              .filter((issue) => issue.severity === "critical")
+              .map((issue) => issue.description),
+          },
+        ],
+      });
+      if (!convergence.passed) {
+        throw new Error(
+          `ChapterCommit rejected; Story Convergence blocked chapter ${chapterNumber}: ${convergence.blockingReasons.join("; ")}`,
+        );
       }
     }
 
@@ -3781,7 +3845,7 @@ ${matrix}`,
     bookDir: string,
     chapterNumber: number,
     externalContext?: string,
-  ): Promise<Pick<WriteChapterInput, "externalContext" | "chapterIntent" | "chapterMemo" | "chapterIntentData" | "contextPackage" | "ruleStack">> {
+  ): Promise<Pick<WriteChapterInput, "externalContext" | "chapterIntent" | "chapterMemo" | "chapterIntentData" | "contextPackage" | "ruleStack" | "compiledWritingContract">> {
     const enrichedExternalContext = await this.enrichContextWithLongFormMemory({
       book,
       bookDir,
@@ -3790,7 +3854,15 @@ ${matrix}`,
       externalContext,
     });
     if ((this.config.inputGovernanceMode ?? "v2") === "legacy") {
-      return { externalContext: enrichedExternalContext };
+      const compiledWritingContract = await this.compileChapterWritingContract({
+        book,
+        bookDir,
+        chapterNumber,
+      });
+      return {
+        externalContext: enrichedExternalContext,
+        compiledWritingContract,
+      };
     }
 
     const { plan, composed } = await this.createGovernedArtifacts(
@@ -3800,6 +3872,13 @@ ${matrix}`,
       enrichedExternalContext,
       { reuseExistingIntentWhenContextMissing: true },
     );
+    const compiledWritingContract = await this.compileChapterWritingContract({
+      book,
+      bookDir,
+      chapterNumber,
+      intent: plan.intent,
+      memo: plan.memo,
+    });
 
     return {
       externalContext: enrichedExternalContext,
@@ -3808,7 +3887,29 @@ ${matrix}`,
       chapterIntentData: plan.intent,
       contextPackage: composed.contextPackage,
       ruleStack: composed.ruleStack,
+      compiledWritingContract,
     };
+  }
+
+  private async compileChapterWritingContract(params: {
+    readonly book: BookConfig;
+    readonly bookDir: string;
+    readonly chapterNumber: number;
+    readonly intent?: WriteChapterInput["chapterIntentData"];
+    readonly memo?: ChapterMemo;
+  }): Promise<CompiledWritingContract> {
+    const spec = await ensureChapterSpec({
+      bookId: params.book.id,
+      bookDir: params.bookDir,
+      chapterNumber: params.chapterNumber,
+      intent: params.intent,
+      memo: params.memo,
+    });
+    return compileWritingContract({
+      bookDir: params.bookDir,
+      platform: params.book.platform,
+      chapterSpec: spec,
+    });
   }
 
   private async resetImportReplayTruthFiles(

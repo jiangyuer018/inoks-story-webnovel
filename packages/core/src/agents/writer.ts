@@ -40,6 +40,10 @@ import { extractPOVFromOutline, filterMatrixByPOV, filterHooksByPOV } from "../u
 import { parseCreativeOutput } from "./writer-parser.js";
 import { buildRuntimeStateArtifacts, type RuntimeStateArtifacts } from "../state/runtime-state-store.js";
 import type { RuntimeStateSnapshot } from "../state/state-reducer.js";
+import {
+  renderCompiledWritingContract,
+  type CompiledWritingContract,
+} from "../story-spec/index.js";
 import { parsePendingHooksMarkdown } from "../utils/memory-retrieval.js";
 import { analyzeHookHealth } from "../utils/hook-health.js";
 import { buildEnglishVarianceBrief } from "../utils/long-span-fatigue.js";
@@ -81,6 +85,7 @@ export interface WriteChapterInput {
   readonly chapterIntentData?: ChapterIntent;
   readonly contextPackage?: ContextPackage;
   readonly ruleStack?: RuleStack;
+  readonly compiledWritingContract?: CompiledWritingContract;
   readonly lengthSpec?: LengthSpec;
   readonly wordCountOverride?: number;
   readonly temperatureOverride?: number;
@@ -229,6 +234,9 @@ export class WriterAgent extends BaseAgent {
         resolvedLengthSpec,
       ),
       buildCoreProseQualityConstraints(resolvedLanguage),
+      input.compiledWritingContract
+        ? renderCompiledWritingContract(input.compiledWritingContract)
+        : "",
     ].join("\n\n"), "longform.writer");
 
     const creativeUserPrompt = input.chapterMemo && input.contextPackage && input.ruleStack
