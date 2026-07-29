@@ -4216,6 +4216,239 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     return c.json({ ok: preflight.passed, ...repair, preflight });
   });
 
+  app.get("/api/v1/books/:id/story-workbench", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: "Invalid book id" }, 400);
+    const {
+      AutomationStateStore,
+      BenchmarkStore,
+      DynamicOutlineRevisionStore,
+      PayoffLedgerStore,
+      PublicationStore,
+      StorySpecStore,
+      loadStoryConstitution,
+      resolveBookAutomation,
+      runStorySystemPreflight,
+    } = await import("@inoks-story-webnovel/core");
+    const bookDir = state.bookDir(id);
+    const specStore = new StorySpecStore(bookDir);
+    const specHeadRaw = await readFile(
+      join(bookDir, ".inoks-story-webnovel", "story-spec", "HEAD"),
+      "utf-8",
+    ).catch(() => "");
+    const specHead = specHeadRaw
+      ? JSON.parse(specHeadRaw) as { chapters?: Record<string, unknown> }
+      : {};
+    const chapterNumbers = Object.keys(specHead.chapters ?? {})
+      .map(Number)
+      .filter((chapter) => Number.isInteger(chapter) && chapter > 0)
+      .sort((left, right) => left - right);
+    const [
+      book,
+      constitution,
+      specs,
+      outlineRevisions,
+      benchmarkProfiles,
+      payoffLedger,
+      publications,
+      automationState,
+      storyHead,
+      storyPreflight,
+      quality,
+    ] = await Promise.all([
+      state.loadBookConfig(id),
+      loadStoryConstitution(bookDir),
+      Promise.all(chapterNumbers.map((chapter) => specStore.loadChapter(chapter))),
+      new DynamicOutlineRevisionStore(bookDir).list(),
+      new BenchmarkStore(bookDir).listProfiles(),
+      new PayoffLedgerStore(bookDir).load(),
+      new PublicationStore(bookDir).list(),
+      new AutomationStateStore(bookDir).load(),
+      new ChapterCommitStore(bookDir).loadHead(),
+      runStorySystemPreflight({
+        bookDir,
+        strict: true,
+        blockOnProjectionFailure: true,
+      }),
+      listWorkbenchQuality(bookDir),
+    ]);
+    return c.json({
+      bookId: id,
+      constitution,
+      specs: specs.filter(Boolean),
+      outlineRevisions,
+      benchmarkProfiles,
+      payoffLedger,
+      publications,
+      automation: {
+        config: resolveBookAutomation(book.automation),
+        runtime: automationState,
+      },
+      storyHead: storyHead
+        ? { commitId: storyHead.commitId, chapter: storyHead.chapter, hash: storyHead.source.contentHash }
+        : null,
+      storyPreflight,
+      quality,
+    });
+  });
+
+  app.post("/api/v1/books/:id/story-workbench/outline/:revision/decision", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: "Invalid book id" }, 400);
+    const body = await c.req.json<{ decision?: unknown }>();
+    if (body.decision !== "approved" && body.decision !== "rejected") {
+      return c.json({ error: "decision must be approved or rejected" }, 400);
+    }
+    const { DynamicOutlineRevisionStore, approveAndApplyOutlineRevision } = await import("@inoks-story-webnovel/core");
+    const revision = body.decision === "approved"
+      ? await approveAndApplyOutlineRevision(state.bookDir(id), c.req.param("revision"))
+      : await new DynamicOutlineRevisionStore(state.bookDir(id)).decide(c.req.param("revision"), "rejected");
+    return c.json(revision);
+  });
+
+  app.put("/api/v1/books/:id/story-workbench/benchmark/:source/:mechanism", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: "Invalid book id" }, 400);
+    const body = await c.req.json<{ approved?: unknown }>();
+    if (typeof body.approved !== "boolean") return c.json({ error: "approved must be boolean" }, 400);
+    const { BenchmarkStore } = await import("@inoks-story-webnovel/core");
+    const profile = await new BenchmarkStore(state.bookDir(id)).setMechanismApproval(
+      c.req.param("source"),
+      c.req.param("mechanism"),
+      body.approved,
+    );
+    return c.json(profile);
+  });
+
+  app.put("/api/v1/books/:id/story-workbench/automation", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: "Invalid book id" }, 400);
+    const { BookAutomationConfigSchema, resolveBookAutomation } = await import("@inoks-story-webnovel/core");
+    const patch = BookAutomationConfigSchema.partial().parse(await c.req.json());
+    const book = await state.loadBookConfig(id);
+    const automation = BookAutomationConfigSchema.parse({
+      ...resolveBookAutomation(book.automation),
+      ...patch,
+    });
+    await state.saveBookConfig(id, { ...book, automation, updatedAt: new Date().toISOString() });
+    return c.json({ ok: true, automation });
+  });
+
+  app.post("/api/v1/books/:id/story-workbench/automation-state", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: "Invalid book id" }, 400);
+    const body = await c.req.json<{ paused?: unknown; editing?: unknown; reason?: unknown }>();
+    const patch: { paused?: boolean; editing?: boolean; pauseReason?: string } = {};
+    if (typeof body.paused === "boolean") patch.paused = body.paused;
+    if (typeof body.editing === "boolean") patch.editing = body.editing;
+    if (typeof body.reason === "string") patch.pauseReason = body.reason;
+    if (body.paused === false) patch.pauseReason = undefined;
+    const { AutomationStateStore } = await import("@inoks-story-webnovel/core");
+    return c.json(await new AutomationStateStore(state.bookDir(id)).update(patch));
+  });
+
+  app.post("/api/v1/books/:id/story-workbench/human-feel/:chapter/issues/:issue", async (c) => {
+    const id = c.req.param("id");
+    const chapter = Number.parseInt(c.req.param("chapter"), 10);
+    if (!isSafeBookId(id) || !Number.isInteger(chapter) || chapter < 1) {
+      return c.json({ error: "Invalid book or chapter" }, 400);
+    }
+    const body = await c.req.json<{ decision?: unknown }>();
+    if (body.decision !== "accepted" && body.decision !== "rejected") {
+      return c.json({ error: "decision must be accepted or rejected" }, 400);
+    }
+    const { HumanFeelDecisionStore } = await import("@inoks-story-webnovel/core");
+    return c.json(await new HumanFeelDecisionStore(state.bookDir(id), chapter)
+      .decide(c.req.param("issue"), body.decision));
+  });
+
+  app.post("/api/v1/books/:id/story-workbench/human-feel/:chapter/paragraphs/:paragraph/lock", async (c) => {
+    const id = c.req.param("id");
+    const chapter = Number.parseInt(c.req.param("chapter"), 10);
+    const paragraph = Number.parseInt(c.req.param("paragraph"), 10);
+    if (!isSafeBookId(id) || !Number.isInteger(chapter) || chapter < 1 || !Number.isInteger(paragraph) || paragraph < 0) {
+      return c.json({ error: "Invalid book, chapter, or paragraph" }, 400);
+    }
+    const body = await c.req.json<{ locked?: unknown }>();
+    if (typeof body.locked !== "boolean") return c.json({ error: "locked must be boolean" }, 400);
+    const { HumanFeelDecisionStore } = await import("@inoks-story-webnovel/core");
+    return c.json(await new HumanFeelDecisionStore(state.bookDir(id), chapter)
+      .setParagraphLock(paragraph, body.locked));
+  });
+
+  app.post("/api/v1/books/:id/story-workbench/publication/export", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: "Invalid book id" }, 400);
+    const body = await c.req.json<{
+      platform?: "fanqie" | "qidian";
+      format?: "zip" | "md" | "txt";
+      chapterFileFormat?: "md" | "txt";
+      fromChapter?: number;
+      toChapter?: number;
+    }>();
+    if (body.platform !== "fanqie" && body.platform !== "qidian") {
+      return c.json({ error: "platform must be fanqie or qidian" }, 400);
+    }
+    const { exportPublicationPackage } = await import("@inoks-story-webnovel/core");
+    return c.json(await exportPublicationPackage({
+      bookId: id,
+      bookDir: state.bookDir(id),
+      platform: body.platform,
+      format: body.format,
+      chapterFileFormat: body.chapterFileFormat,
+      fromChapter: body.fromChapter,
+      toChapter: body.toChapter,
+    }));
+  });
+
+  app.post("/api/v1/books/:id/story-workbench/publication/import-log", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: "Invalid book id" }, 400);
+    const body = await c.req.json<{ platform?: "fanqie" | "qidian"; log?: unknown }>();
+    if ((body.platform !== "fanqie" && body.platform !== "qidian") || typeof body.log !== "string") {
+      return c.json({ error: "platform and log are required" }, 400);
+    }
+    const { importExternalPublicationLog } = await import("@inoks-story-webnovel/core");
+    return c.json(await importExternalPublicationLog({
+      bookDir: state.bookDir(id),
+      platform: body.platform,
+      log: body.log,
+    }));
+  });
+
+  app.post("/api/v1/books/:id/story-workbench/publication/:chapter/status", async (c) => {
+    const id = c.req.param("id");
+    const chapter = Number(c.req.param("chapter"));
+    if (!isSafeBookId(id) || !Number.isInteger(chapter) || chapter < 1) {
+      return c.json({ error: "Invalid book id or chapter" }, 400);
+    }
+    const body = await c.req.json<{
+      platform?: unknown;
+      chapterCommitId?: unknown;
+      status?: unknown;
+    }>();
+    const {
+      PublicationPlatformSchema,
+      PublicationStatusSchema,
+      PublicationStore,
+    } = await import("@inoks-story-webnovel/core");
+    const platform = PublicationPlatformSchema.safeParse(body.platform);
+    const status = PublicationStatusSchema.safeParse(body.status);
+    if (!platform.success || !status.success || typeof body.chapterCommitId !== "string") {
+      return c.json({ error: "platform, chapterCommitId, and a valid status are required" }, 400);
+    }
+    if (!["handed_to_extension", "published_external", "failed_external", "status_unknown"].includes(status.data)) {
+      return c.json({ error: "This endpoint only accepts explicit external status transitions" }, 400);
+    }
+    return c.json(await new PublicationStore(state.bookDir(id)).transition({
+      platform: platform.data,
+      chapterNumber: chapter,
+      chapterCommitId: body.chapterCommitId,
+      status: status.data,
+      publishedAt: status.data === "published_external" ? new Date().toISOString() : undefined,
+    }));
+  });
+
   app.get("/api/v1/books/:id/lock", async (c) => {
     const bookId = c.req.param("id");
     const lock = await state.getBookLockInfo(bookId);
@@ -6521,6 +6754,23 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
   return app;
 }
 
+async function listWorkbenchQuality(bookDir: string): Promise<Record<string, ReadonlyArray<unknown>>> {
+  const result: Record<string, ReadonlyArray<unknown>> = {};
+  for (const area of ["prose", "human-feel", "payoff"] as const) {
+    const dir = join(bookDir, "quality", area);
+    const names = (await readdir(dir).catch(() => []))
+      .filter((name) => /^chapter-\d+\.json$/.test(name))
+      .sort()
+      .slice(-20)
+      .reverse();
+    result[area] = await Promise.all(names.map(async (name) => {
+      const report = JSON.parse(await readFile(join(dir, name), "utf-8")) as Record<string, unknown>;
+      return { reportPath: relative(bookDir, join(dir, name)).replaceAll("\\", "/"), ...report };
+    }));
+  }
+  return result;
+}
+
 // --- Standalone runner ---
 
 export async function startStudioServer(
@@ -6571,6 +6821,6 @@ export async function startStudioServer(
     }
   }
 
-  console.log(`Inoks Story Webnovel Studio running on http://localhost:${port}`);
+  console.log(`inkOS Studio running on http://localhost:${port}`);
   serve({ fetch: app.fetch, port });
 }

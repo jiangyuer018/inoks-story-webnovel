@@ -901,8 +901,8 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const emptyGuidance = (() => {
     if (currentSessionKind === "short") {
       return isZh
-        ? "说一个短篇方向、标题灵感、人物压力或核心冲突，我会走 Inoks Story Webnovel Short 生成正文、简介和封面。"
-        : "Describe a short-fiction direction, title hook, pressure, or core conflict to run Inoks Story Webnovel Short.";
+        ? "说一个短篇方向、标题灵感、人物压力或核心冲突，我会走 inkOS Short 生成正文、简介和封面。"
+        : "Describe a short-fiction direction, title hook, pressure, or core conflict to run inkOS Short.";
     }
     if (currentSessionKind === "play") {
       return isZh

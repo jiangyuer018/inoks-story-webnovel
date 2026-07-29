@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { canonicalJson, sha256 } from "../story-system/commit.js";
 import type { ChapterCommit } from "../story-system/types.js";
 import { storySpecRoot } from "../story-spec/constitution-loader.js";
+import { StorySpecStore } from "../story-spec/spec-store.js";
 import type { DynamicOutlineRevision, OutlineChange } from "./types.js";
 
 export class DynamicOutlineRevisionStore {
@@ -125,6 +126,39 @@ export async function listFutureSpecIds(
       && typeof value.id === "string")
     .sort(([left], [right]) => Number(left) - Number(right))
     .map(([, value]) => String(value.id));
+}
+
+export async function approveAndApplyOutlineRevision(
+  bookDir: string,
+  id: string,
+): Promise<DynamicOutlineRevision> {
+  const revisions = new DynamicOutlineRevisionStore(bookDir);
+  const current = await revisions.load(id);
+  if (!current) throw new Error(`Dynamic outline revision ${id} not found`);
+  const approved = current.status === "proposed"
+    ? await revisions.decide(id, "approved")
+    : current;
+  if (approved.status === "applied") return approved;
+  if (approved.status !== "approved") {
+    throw new Error(`Dynamic outline revision ${id} is ${approved.status}, not approved`);
+  }
+
+  const headRaw = await readFile(join(storySpecRoot(bookDir), "HEAD"), "utf-8").catch(() => "");
+  const head = headRaw
+    ? JSON.parse(headRaw) as { chapters?: Record<string, { id?: unknown }> }
+    : {};
+  const chaptersBySpecId = new Map(
+    Object.entries(head.chapters ?? {})
+      .filter((entry): entry is [string, { id: string }] => typeof entry[1].id === "string")
+      .map(([chapter, value]) => [value.id, Number(chapter)]),
+  );
+  const store = new StorySpecStore(bookDir);
+  for (const specId of approved.affectedSpecIds) {
+    const chapter = chaptersBySpecId.get(specId);
+    if (!chapter) continue;
+    await store.markStale(chapter, approved.reasons.join("; ") || `Approved revision ${approved.id}`);
+  }
+  return revisions.markApplied(id);
 }
 
 function collectRevisionSignals(commit: ChapterCommit): ReadonlyArray<string> {

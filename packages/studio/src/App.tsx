@@ -1,10 +1,11 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useHashRoute } from "./hooks/use-hash-route";
 import type { HashRoute } from "./hooks/use-hash-route";
-import { Sidebar } from "./components/Sidebar";
+import { StudioRail } from "./components/StudioRail";
 import { Dashboard } from "./pages/Dashboard";
 import { ChatPage } from "./pages/ChatPage";
 import { BookDetail } from "./pages/BookDetail";
+import { StoryWorkbench } from "./pages/StoryWorkbench";
 import { ChapterReader } from "./pages/ChapterReader";
 import { Analytics } from "./pages/Analytics";
 import { ServiceListPage } from "./pages/ServiceListPage";
@@ -94,6 +95,7 @@ export function App() {
     toChat: () => setRoute({ page: "chat" }),
     toBook: (bookId: string) => setRoute({ page: "book", bookId }),
     toBookSettings: (bookId: string) => setRoute({ page: "book-settings", bookId }),
+    toStoryWorkbench: (bookId: string) => setRoute({ page: "story-workbench", bookId }),
     toBookCreate: () => setRoute({ page: "book-create" }),
     toChapter: (bookId: string, chapterNumber: number) =>
       setRoute({ page: "chapter", bookId, chapterNumber }),
@@ -119,7 +121,9 @@ export function App() {
 
   const activeBookId = deriveActiveBookId(route);
   const activePage =
-    activeBookId
+    route.page === "story-workbench"
+      ? `workbench:${route.bookId}`
+      : activeBookId
       ? `book:${activeBookId}`
       : route.page === "service-detail"
         ? "services"
@@ -176,12 +180,12 @@ export function App() {
   return (
     <div className="h-screen bg-background text-foreground flex overflow-hidden font-sans">
       {/* Left Sidebar */}
-      <Sidebar nav={nav} activePage={activePage} sse={sse} t={t} />
+      <StudioRail nav={nav} activePage={activePage} sse={sse} />
 
       {/* Center Content */}
       <div className="flex-1 flex flex-col min-w-0 bg-background/30 backdrop-blur-sm">
         {/* Header Strip */}
-        <header className="h-14 shrink-0 flex items-center justify-between px-8 border-b border-border/40">
+        <header className="h-14 shrink-0 flex items-center justify-between gap-2 px-3 sm:px-5 lg:px-8 border-b border-border/40">
           <div className="flex items-center gap-2">
              <button
                onClick={nav.toDashboard}
@@ -190,7 +194,7 @@ export function App() {
                <House size={18} />
                <span>{t("bread.home")}</span>
                <span className="text-muted-foreground/70">/</span>
-               <span className="font-serif">Inoks Story Webnovel Studio</span>
+               <span className="hidden font-sans sm:inline">inkOS Studio</span>
              </button>
           </div>
 
@@ -226,7 +230,7 @@ export function App() {
         </header>
 
         {/* Main Content Area */}
-        <main className="flex-1 relative overflow-y-auto scroll-smooth">
+        <main className="flex-1 relative overflow-y-auto pb-24 scroll-smooth lg:pb-0">
           {route.page === "dashboard" && (
             <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
               <Dashboard nav={nav} sse={sse} theme={theme} t={t} />
@@ -271,6 +275,11 @@ export function App() {
           {route.page === "book-settings" && (
             <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
               <BookDetail bookId={route.bookId} nav={nav} theme={theme} t={t} sse={sse} />
+            </div>
+          )}
+          {route.page === "story-workbench" && (
+            <div className="max-w-6xl mx-auto px-4 py-7 sm:px-6 md:px-10 md:py-10 fade-in">
+              <StoryWorkbench bookId={route.bookId} nav={nav} />
             </div>
           )}
           {route.page === "chapter" && (

@@ -10,6 +10,7 @@ import {
   allocateEventCharBudget,
   allocateEventsToChapters,
   analyzeNarrativeConcreteness,
+  approveAndApplyOutlineRevision,
   auditEmotionTrajectory,
   calculateConcretenessTarget,
   createDefaultEmotionTrajectory,
@@ -18,6 +19,7 @@ import {
   selectWeightedContext,
   validateEventCausalGraph,
 } from "../narrative-research/index.js";
+import { ensureChapterSpec, StorySpecStore } from "../story-spec/index.js";
 import { buildChapterCommit } from "../story-system/index.js";
 import type { ChapterCommit, StoryEvent } from "../story-system/types.js";
 
@@ -211,17 +213,23 @@ describe("Narrative Research Adaptation Layer", () => {
     expect(validation.missingReferences[0]).toContain("e1");
 
     const bookDir = await temporaryBook();
+    const spec = await ensureChapterSpec({
+      bookId: "demo",
+      bookDir,
+      chapterNumber: 2,
+    });
     const store = new DynamicOutlineRevisionStore(bookDir);
     const proposed = await store.propose({
       bookId: "demo",
       triggeredByCommitId: "commit-1",
-      affectedSpecIds: ["spec-2"],
-      proposedChanges: [{ specId: "spec-2", field: "goal", oldValue: "A", newValue: "B" }],
+      affectedSpecIds: [spec.id],
+      proposedChanges: [{ specId: spec.id, field: "goal", oldValue: "A", newValue: "B" }],
       reasons: ["关系发生变化"],
     });
     expect(proposed.status).toBe("proposed");
-    const approved = await store.decide(proposed.id, "approved");
-    expect(approved.status).toBe("approved");
+    const approved = await approveAndApplyOutlineRevision(bookDir, proposed.id);
+    expect(approved.status).toBe("applied");
+    expect((await new StorySpecStore(bookDir).loadChapter(2))?.status).toBe("stale");
     expect((await store.list())[0]?.triggeredByCommitId).toBe("commit-1");
   });
 

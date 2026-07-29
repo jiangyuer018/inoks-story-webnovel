@@ -1,0 +1,993 @@
+import { useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  BookOpenCheck,
+  Check,
+  Download,
+  GitBranch,
+  Loader2,
+  Lock,
+  Pause,
+  Play,
+  ShieldCheck,
+  Upload,
+  X,
+} from "lucide-react";
+import { postApi, putApi, useApi } from "../hooks/use-api";
+import { Button } from "../components/ui/button";
+
+type Tab = "overview" | "spec" | "outline" | "benchmark" | "quality" | "canon" | "automation" | "publishing";
+
+interface StoryWorkbenchData {
+  readonly bookId: string;
+  readonly constitution: string;
+  readonly specs: ReadonlyArray<{
+    readonly id: string;
+    readonly version: number;
+    readonly status: string;
+    readonly chapterNumber: number;
+    readonly chapterGoal: string;
+    readonly hardConstraints: ReadonlyArray<string>;
+    readonly requiredBeats: ReadonlyArray<string>;
+  }>;
+  readonly outlineRevisions: ReadonlyArray<{
+    readonly id: string;
+    readonly status: string;
+    readonly reasons: ReadonlyArray<string>;
+    readonly affectedSpecIds: ReadonlyArray<string>;
+    readonly proposedChanges: ReadonlyArray<{
+      readonly specId: string;
+      readonly field: string;
+      readonly newValue: unknown;
+    }>;
+  }>;
+  readonly benchmarkProfiles: ReadonlyArray<{
+    readonly sourceId: string;
+    readonly title: string;
+    readonly roles: ReadonlyArray<string>;
+    readonly extractedMechanisms: ReadonlyArray<{
+      readonly id: string;
+      readonly name: string;
+      readonly emotionalFunction: string;
+      readonly approved: boolean;
+      readonly prohibitedSourceDetails: ReadonlyArray<string>;
+    }>;
+  }>;
+  readonly payoffLedger: ReadonlyArray<{
+    readonly id: string;
+    readonly promise: string;
+    readonly status: string;
+    readonly targetWindow: { readonly from: number; readonly to: number };
+  }>;
+  readonly publications: ReadonlyArray<{
+    readonly chapterNumber: number;
+    readonly chapterCommitId: string;
+    readonly platform: string;
+    readonly status: string;
+    readonly exportedFileName?: string;
+  }>;
+  readonly automation: {
+    readonly config: {
+      readonly enabled: boolean;
+      readonly priority: number;
+      readonly chaptersPerCycle: number;
+      readonly maxChaptersPerDay: number;
+      readonly minIntervalMinutes: number;
+      readonly runOnDaemonStart: boolean;
+      readonly requireHumanApprovalBeforeCommit: boolean;
+      readonly requireHumanApprovalBeforePublish: boolean;
+    };
+    readonly runtime: {
+      readonly paused: boolean;
+      readonly editing: boolean;
+      readonly pauseReason?: string;
+      readonly lastWrittenAt?: string;
+      readonly dailyCount: number;
+      readonly lastError?: string;
+    };
+  };
+  readonly storyHead: { readonly commitId: string; readonly chapter: number; readonly hash: string } | null;
+  readonly storyPreflight: {
+    readonly passed: boolean;
+    readonly headCommitId: string | null;
+    readonly headChapter: number;
+    readonly repairedTransactions: ReadonlyArray<string>;
+    readonly errors: ReadonlyArray<string>;
+    readonly warnings: ReadonlyArray<string>;
+  };
+  readonly quality: {
+    readonly prose: ReadonlyArray<QualityReport>;
+    readonly "human-feel": ReadonlyArray<HumanFeelReport>;
+    readonly payoff: ReadonlyArray<QualityReport>;
+  };
+}
+
+interface QualityReport {
+  readonly reportPath: string;
+  readonly chapter?: number;
+  readonly score?: number;
+  readonly level?: string;
+  readonly finalStatus?: string;
+  readonly blockingCount?: number;
+  readonly advisoryCount?: number;
+  readonly verdict?: string;
+  readonly issues?: ReadonlyArray<{ readonly id?: string; readonly message?: string; readonly severity?: string }>;
+}
+
+interface HumanFeelIssue {
+  readonly id: string;
+  readonly category: string;
+  readonly severity: string;
+  readonly message: string;
+  readonly rationale: string;
+  readonly suggestion: string;
+  readonly paragraphIndex: number;
+  readonly excerpt: string;
+}
+
+interface HumanFeelReport extends QualityReport {
+  readonly blockingIssues?: ReadonlyArray<HumanFeelIssue>;
+  readonly expositionIssues?: ReadonlyArray<HumanFeelIssue>;
+  readonly decorativeEnvironmentIssues?: ReadonlyArray<HumanFeelIssue>;
+  readonly genericMetaphorIssues?: ReadonlyArray<HumanFeelIssue>;
+  readonly emptyActionIssues?: ReadonlyArray<HumanFeelIssue>;
+  readonly redundantThoughtIssues?: ReadonlyArray<HumanFeelIssue>;
+  readonly artificialDialogueIssues?: ReadonlyArray<HumanFeelIssue>;
+  readonly reactionCouplingIssues?: ReadonlyArray<HumanFeelIssue>;
+  readonly sceneStagnationIssues?: ReadonlyArray<HumanFeelIssue>;
+  readonly overNeatPlotIssues?: ReadonlyArray<HumanFeelIssue>;
+  readonly excessiveExplanationIssues?: ReadonlyArray<HumanFeelIssue>;
+}
+
+const TABS: ReadonlyArray<{ readonly id: Tab; readonly zh: string; readonly en: string }> = [
+  { id: "overview", zh: "总览", en: "Overview" },
+  { id: "spec", zh: "规格", en: "Specs" },
+  { id: "outline", zh: "动态大纲", en: "Outline" },
+  { id: "benchmark", zh: "对标机制", en: "Benchmark" },
+  { id: "quality", zh: "质量审查", en: "Quality" },
+  { id: "canon", zh: "正史提交", en: "Canon" },
+  { id: "automation", zh: "自动化", en: "Automation" },
+  { id: "publishing", zh: "发布", en: "Publishing" },
+];
+
+export function StoryWorkbench({
+  bookId,
+  nav,
+}: {
+  readonly bookId: string;
+  readonly nav: { readonly toBook: (bookId: string) => void };
+}) {
+  const path = `/books/${encodeURIComponent(bookId)}/story-workbench`;
+  const { data, loading, error, refetch } = useApi<StoryWorkbenchData>(path);
+  const [tab, setTab] = useState<Tab>("overview");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const act = async (key: string, action: () => Promise<unknown>, message: string) => {
+    setBusy(key);
+    setNotice(null);
+    try {
+      await action();
+      await refetch();
+      setNotice(message);
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (loading) return <WorkbenchSkeleton />;
+  if (error || !data) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-5">
+        <h1 className="text-xl font-semibold">故事工作台加载失败</h1>
+        <p className="mt-2 text-sm text-destructive">{error ?? "No data"}</p>
+        <Button className="mt-4" variant="outline" onClick={() => void refetch()}>重新加载</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <button type="button" onClick={() => nav.toBook(bookId)} className="text-sm text-muted-foreground hover:text-foreground">
+            返回作品
+          </button>
+          <h1 className="mt-2 text-3xl">故事控制中心</h1>
+          <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+            从章纲到外部发布，每一步都显示来源、阻断项和下一项人工动作。
+          </p>
+        </div>
+        <HeadStatus data={data} />
+      </header>
+
+      <nav aria-label="Story workbench sections" className="flex gap-1 overflow-x-auto border-b border-border">
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setTab(item.id)}
+            aria-current={tab === item.id ? "page" : undefined}
+            className={`shrink-0 px-3 py-2.5 text-sm font-medium transition-colors ${
+              tab === item.id
+                ? "border-b-2 border-primary text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {item.zh}
+          </button>
+        ))}
+      </nav>
+
+      {notice && (
+        <div role="status" className="rounded-lg border border-border bg-secondary/40 px-4 py-3 text-sm">
+          {notice}
+        </div>
+      )}
+
+      {tab === "overview" && <OverviewPanel data={data} setTab={setTab} />}
+      {tab === "spec" && <SpecPanel data={data} />}
+      {tab === "outline" && <OutlinePanel data={data} busy={busy} act={act} path={path} />}
+      {tab === "benchmark" && <BenchmarkPanel data={data} busy={busy} act={act} path={path} />}
+      {tab === "quality" && <QualityPanel data={data} busy={busy} act={act} path={path} />}
+      {tab === "canon" && <CanonPanel data={data} />}
+      {tab === "automation" && <AutomationPanel data={data} busy={busy} act={act} path={path} />}
+      {tab === "publishing" && <PublishingPanel data={data} busy={busy} act={act} path={path} />}
+    </div>
+  );
+}
+
+function HeadStatus({ data }: { readonly data: StoryWorkbenchData }) {
+  return (
+    <div className="min-w-[260px] rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <ShieldCheck size={16} className={data.storyHead ? "text-emerald-600" : "text-amber-600"} />
+        {data.storyHead ? `正史已提交至第 ${data.storyHead.chapter} 章` : "尚无 accepted Commit"}
+      </div>
+      {data.storyHead && (
+        <code className="mt-2 block truncate text-xs text-muted-foreground" title={data.storyHead.commitId}>
+          {data.storyHead.commitId}
+        </code>
+      )}
+    </div>
+  );
+}
+
+function OverviewPanel({
+  data,
+  setTab,
+}: {
+  readonly data: StoryWorkbenchData;
+  readonly setTab: (tab: Tab) => void;
+}) {
+  const latestProse = data.quality.prose.at(-1);
+  const latestHuman = data.quality["human-feel"].at(-1);
+  const prosePassed = Boolean(latestProse)
+    && (latestProse?.blockingCount ?? 0) === 0
+    && !/reject|failed|blocked/i.test(latestProse?.finalStatus ?? "");
+  const humanPassed = Boolean(latestHuman)
+    && !/revise|reject|failed|blocked/i.test(latestHuman?.verdict ?? latestHuman?.level ?? "");
+  const pendingOutline = data.outlineRevisions.filter((revision) => revision.status === "proposed").length;
+  const publication = data.publications.at(-1);
+  const next = pendingOutline > 0
+    ? { label: "处理动态大纲提案", tab: "outline" as const }
+    : !prosePassed || !humanPassed
+      ? { label: "检查正文质量报告", tab: "quality" as const }
+      : !data.storyHead
+        ? { label: "核对正史提交条件", tab: "canon" as const }
+        : !data.storyPreflight.passed
+          ? { label: "修复正史或投影异常", tab: "canon" as const }
+          : { label: "准备发布包", tab: "publishing" as const };
+  const stages = [
+    {
+      label: "章纲与约束",
+      detail: data.specs.length > 0 ? `${data.specs.length} 个 Chapter Spec` : "尚未生成 Chapter Spec",
+      state: data.specs.some((spec) => spec.status === "stale") ? "attention" : data.specs.length > 0 ? "done" : "waiting",
+    },
+    {
+      label: "动态调整",
+      detail: pendingOutline > 0 ? `${pendingOutline} 项待人工决定` : "没有待决定提案",
+      state: pendingOutline > 0 ? "attention" : "done",
+    },
+    {
+      label: "正文质量门",
+      detail: latestProse ? `Prose ${latestProse.score ?? "已扫描"} · Human ${latestHuman?.score ?? "待审"}` : "尚无正文报告",
+      state: prosePassed && humanPassed ? "done" : latestProse ? "attention" : "waiting",
+    },
+    {
+      label: "ChapterCommit",
+      detail: data.storyHead ? `HEAD 第 ${data.storyHead.chapter} 章` : "尚无 accepted Commit",
+      state: data.storyHead ? "done" : "waiting",
+    },
+    {
+      label: "派生投影",
+      detail: !data.storyHead
+        ? "等待首个 accepted Commit"
+        : data.storyPreflight.passed
+          ? "Commit 链与投影一致"
+          : `${data.storyPreflight.errors.length} 项阻断`,
+      state: !data.storyHead ? "waiting" : data.storyPreflight.passed ? "done" : "attention",
+    },
+    {
+      label: "外部发布",
+      detail: publication ? `${publication.platform} · ${publication.status}` : "尚未生成发布包",
+      state: publication?.status === "published_external" ? "done" : publication?.status === "failed_external" ? "attention" : "waiting",
+    },
+  ] as const;
+
+  return (
+    <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
+      <div className="rounded-2xl border border-border bg-card">
+        <header className="border-b border-border px-5 py-4">
+          <p className="text-xs font-semibold tracking-[0.14em] text-primary">CANON PIPELINE</p>
+          <h2 className="mt-1 text-xl">本书生产链</h2>
+          <p className="mt-1 text-sm text-muted-foreground">状态来自持久化结果，不用展示分数替代正式提交状态。</p>
+        </header>
+        <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-3">
+          {stages.map((stage, index) => (
+            <div key={stage.label} className="bg-card px-5 py-5">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+                <StageState state={stage.state} />
+              </div>
+              <h3 className="mt-5 font-sans text-sm font-semibold">{stage.label}</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{stage.detail}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+      <aside className="space-y-4">
+        <div className="rounded-2xl bg-slate-950 p-5 text-slate-100 shadow-lg dark:bg-slate-900">
+          <p className="text-xs font-semibold tracking-[0.14em] text-cyan-300">NEXT HUMAN ACTION</p>
+          <h2 className="mt-3 font-sans text-lg font-semibold">{next.label}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-400">自动化不会越过待批准提案、质量阻断或失败投影。</p>
+          <Button className="mt-5 w-full bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={() => setTab(next.tab)}>
+            前往处理
+          </Button>
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <p className="text-xs text-muted-foreground">自动写作</p>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="text-sm font-medium">{data.automation.config.enabled ? "已为本书启用" : "保持关闭"}</span>
+            <StatusBadge value={data.automation.runtime.paused ? "paused" : data.automation.config.enabled ? "ready" : "manual"} />
+          </div>
+          <p className="mt-3 text-xs leading-5 text-muted-foreground">
+            今日已写 {data.automation.runtime.dailyCount} 章；人工编辑状态：{data.automation.runtime.editing ? "占用中" : "空闲"}。
+          </p>
+        </div>
+      </aside>
+    </section>
+  );
+}
+
+function CanonPanel({ data }: { readonly data: StoryWorkbenchData }) {
+  return (
+    <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="rounded-2xl border border-border bg-card">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <div>
+            <h2 className="text-xl">正史与投影预检</h2>
+            <p className="mt-1 text-sm text-muted-foreground">accepted Commit 是唯一权威写入口；Markdown、MemoryDB 与检索索引都是投影。</p>
+          </div>
+          <StatusBadge value={data.storyPreflight.passed ? "passed" : "blocked"} />
+        </header>
+        <dl className="grid gap-px bg-border sm:grid-cols-2">
+          <CanonicalValue label="HEAD 章节" value={data.storyPreflight.headChapter || "—"} />
+          <CanonicalValue label="HEAD Commit" value={data.storyPreflight.headCommitId ?? "尚无"} mono />
+          <CanonicalValue label="恢复事务" value={data.storyPreflight.repairedTransactions.length} />
+          <CanonicalValue label="预检阻断" value={data.storyPreflight.errors.length} />
+        </dl>
+        {(data.storyPreflight.errors.length > 0 || data.storyPreflight.warnings.length > 0) && (
+          <div className="space-y-4 border-t border-border px-5 py-5">
+            <List values={data.storyPreflight.errors} empty="" />
+            <List values={data.storyPreflight.warnings} empty="" />
+          </div>
+        )}
+      </div>
+      <div className="rounded-2xl border border-border bg-card p-5">
+        <h2 className="text-xl">读者合同与叙事债务</h2>
+        <p className="mt-1 text-sm text-muted-foreground">摘要只用于压缩；兑现账本不会覆盖客观事实。</p>
+        <div className="mt-4 space-y-3">
+          {data.payoffLedger.length === 0 && <Empty text="尚无已登记的读者承诺。" />}
+          {data.payoffLedger.slice(-8).map((item) => (
+            <div key={item.id} className="rounded-xl border border-border px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <StatusBadge value={item.status} />
+                <span className="font-mono text-xs text-muted-foreground">CH {item.targetWindow.from}–{item.targetWindow.to}</span>
+              </div>
+              <p className="mt-2 text-sm">{item.promise}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StageState({ state }: { readonly state: "done" | "attention" | "waiting" }) {
+  if (state === "done") return <span className="flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-300"><Check size={13} /> 就绪</span>;
+  if (state === "attention") return <span className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300"><AlertTriangle size={13} /> 待处理</span>;
+  return <span className="text-xs text-muted-foreground">等待</span>;
+}
+
+function CanonicalValue({
+  label,
+  value,
+  mono,
+}: {
+  readonly label: string;
+  readonly value: string | number;
+  readonly mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0 bg-card px-5 py-4">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={`mt-2 truncate text-sm font-medium ${mono ? "font-mono text-xs" : ""}`} title={String(value)}>{value}</dd>
+    </div>
+  );
+}
+
+function SpecPanel({ data }: { readonly data: StoryWorkbenchData }) {
+  return (
+    <section className="space-y-5">
+      <div>
+        <h2 className="text-xl">Story Constitution</h2>
+        <details className="mt-3 rounded-xl border border-border bg-card">
+          <summary className="px-4 py-3 text-sm font-medium">查看本书不可妥协规则</summary>
+          <pre className="max-h-[420px] overflow-auto border-t border-border p-4 whitespace-pre-wrap text-sm leading-7">{data.constitution}</pre>
+        </details>
+      </div>
+      <div>
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <h2 className="text-xl">Chapter Specs</h2>
+            <p className="mt-1 text-sm text-muted-foreground">stale 或未批准规格不会进入自动写作。</p>
+          </div>
+          <span className="text-sm text-muted-foreground">{data.specs.length} 个版本头</span>
+        </div>
+        <div className="mt-3 divide-y divide-border rounded-xl border border-border bg-card">
+          {data.specs.length === 0 && <Empty text="写章时会自动生成首个 Chapter Spec。" />}
+          {data.specs.map((spec) => (
+            <details key={spec.id} className="group">
+              <summary className="flex items-center gap-3 px-4 py-3">
+                <span className="w-16 font-mono text-xs text-muted-foreground">CH {spec.chapterNumber}</span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{spec.chapterGoal}</span>
+                <StatusBadge value={spec.status} />
+                <span className="text-xs text-muted-foreground">v{spec.version}</span>
+              </summary>
+              <div className="border-t border-border bg-secondary/20 px-4 py-4 text-sm">
+                <p className="font-medium">硬约束</p>
+                <List values={spec.hardConstraints} empty="无额外硬约束" />
+                <p className="mt-4 font-medium">Required Beats</p>
+                <List values={spec.requiredBeats} empty="本章没有人工指定的 hard beat" mono />
+              </div>
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function OutlinePanel(props: PanelProps) {
+  const proposed = props.data.outlineRevisions.filter((item) => item.status === "proposed");
+  return (
+    <section>
+      <h2 className="text-xl">动态大纲修订</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Commit 只产生提案。批准或拒绝后保留版本记录，不直接覆盖历史 Spec。</p>
+      <div className="mt-4 divide-y divide-border rounded-xl border border-border bg-card">
+        {props.data.outlineRevisions.length === 0 && <Empty text="当前没有动态大纲修订。" />}
+        {props.data.outlineRevisions.map((revision) => (
+          <div key={revision.id} className="p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <GitBranch size={16} />
+              <code className="text-xs">{revision.id}</code>
+              <StatusBadge value={revision.status} />
+            </div>
+            <List values={revision.reasons} empty="无原因说明" />
+            <p className="mt-3 text-xs text-muted-foreground">
+              影响 {revision.affectedSpecIds.length} 个 Spec，包含 {revision.proposedChanges.length} 项修改。
+            </p>
+            {revision.status === "proposed" && (
+              <div className="mt-4 flex gap-2">
+                <ActionButton
+                  busy={props.busy === `${revision.id}:approve`}
+                  onClick={() => props.act(
+                    `${revision.id}:approve`,
+                    () => postApi(`${props.path}/outline/${encodeURIComponent(revision.id)}/decision`, { decision: "approved" }),
+                    "动态大纲修订已批准。",
+                  )}
+                >
+                  <Check size={14} /> 批准修订
+                </ActionButton>
+                <ActionButton
+                  variant="outline"
+                  busy={props.busy === `${revision.id}:reject`}
+                  onClick={() => props.act(
+                    `${revision.id}:reject`,
+                    () => postApi(`${props.path}/outline/${encodeURIComponent(revision.id)}/decision`, { decision: "rejected" }),
+                    "动态大纲修订已拒绝。",
+                  )}
+                >
+                  <X size={14} /> 拒绝修订
+                </ActionButton>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {proposed.length > 0 && (
+        <p className="mt-3 flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
+          <AlertTriangle size={15} /> 有 {proposed.length} 项待人工决定，自动写作保持阻断。
+        </p>
+      )}
+    </section>
+  );
+}
+
+function BenchmarkPanel(props: PanelProps) {
+  return (
+    <section>
+      <h2 className="text-xl">对标机制</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Writer 只读取已批准的抽象机制，不读取源文本和被禁止的专有细节。</p>
+      <div className="mt-4 space-y-4">
+        {props.data.benchmarkProfiles.length === 0 && (
+          <div className="rounded-xl border border-border bg-card"><Empty text="尚未导入用户合法提供的对标文本。" /></div>
+        )}
+        {props.data.benchmarkProfiles.map((profile) => (
+          <article key={profile.sourceId} className="rounded-xl border border-border bg-card">
+            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <div>
+                <h3 className="text-base font-semibold">{profile.title}</h3>
+                <p className="text-xs text-muted-foreground">{profile.roles.join(" · ")}</p>
+              </div>
+              <span className="text-xs text-muted-foreground">{profile.extractedMechanisms.length} 个机制</span>
+            </header>
+            <div className="divide-y divide-border">
+              {profile.extractedMechanisms.map((mechanism) => (
+                <div key={mechanism.id} className="flex flex-wrap items-start gap-4 px-4 py-3">
+                  <div className="min-w-[240px] flex-1">
+                    <p className="text-sm font-medium">{mechanism.name}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{mechanism.emotionalFunction}</p>
+                    {mechanism.prohibitedSourceDetails.length > 0 && (
+                      <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                        禁止迁移：{mechanism.prohibitedSourceDetails.join("、")}
+                      </p>
+                    )}
+                  </div>
+                  <ActionButton
+                    variant={mechanism.approved ? "outline" : "default"}
+                    busy={props.busy === mechanism.id}
+                    onClick={() => props.act(
+                      mechanism.id,
+                      () => putApi(
+                        `${props.path}/benchmark/${encodeURIComponent(profile.sourceId)}/${encodeURIComponent(mechanism.id)}`,
+                        { approved: !mechanism.approved },
+                      ),
+                      mechanism.approved ? "机制已撤销批准。" : "机制已批准，后续 Writer 可读取其抽象规则。",
+                    )}
+                  >
+                    {mechanism.approved ? <X size={14} /> : <Check size={14} />}
+                    {mechanism.approved ? "撤销批准" : "批准机制"}
+                  </ActionButton>
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function QualityPanel(props: PanelProps) {
+  const latestHuman = props.data.quality["human-feel"][0];
+  const humanIssues = useMemo(() => collectHumanIssues(latestHuman), [latestHuman]);
+  const humanChapter = reportChapter(latestHuman);
+  return (
+    <section className="space-y-6">
+      <div>
+        <h2 className="text-xl">质量审查</h2>
+        <p className="mt-1 text-sm text-muted-foreground">先看 blocking，再看分数。人工决定只写入审查记录，不改写正史。</p>
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <QualitySummary label="Prose Quality" report={props.data.quality.prose[0]} />
+        <QualitySummary label="Human Feel" report={latestHuman} />
+        <QualitySummary label="Payoff" report={props.data.quality.payoff[0]} />
+      </div>
+      <div>
+        <h3 className="text-lg">真人感问题定位</h3>
+        <div className="mt-3 divide-y divide-border rounded-xl border border-border bg-card">
+          {humanIssues.length === 0 && <Empty text="最新报告没有可显示的问题。" />}
+          {humanIssues.map((issue) => (
+            <div key={issue.id} className="p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge value={issue.severity} />
+                <span className="text-xs text-muted-foreground">第 {issue.paragraphIndex + 1} 段 · {issue.category}</span>
+              </div>
+              <p className="mt-2 text-sm font-medium">{issue.message}</p>
+              <blockquote className="mt-2 rounded-lg bg-secondary/50 px-3 py-2 text-sm leading-6">{issue.excerpt}</blockquote>
+              <p className="mt-2 text-sm text-muted-foreground">{issue.rationale}</p>
+              <p className="mt-1 text-sm">建议：{issue.suggestion}</p>
+              {humanChapter && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <ActionButton
+                    busy={props.busy === `${issue.id}:accept`}
+                    onClick={() => props.act(
+                      `${issue.id}:accept`,
+                      () => postApi(
+                        `${props.path}/human-feel/${humanChapter}/issues/${encodeURIComponent(issue.id)}`,
+                        { decision: "accepted" },
+                      ),
+                      "已接受此问题，记录为待修。",
+                    )}
+                  >
+                    <Check size={14} /> 接受问题
+                  </ActionButton>
+                  <ActionButton
+                    variant="outline"
+                    busy={props.busy === `${issue.id}:reject`}
+                    onClick={() => props.act(
+                      `${issue.id}:reject`,
+                      () => postApi(
+                        `${props.path}/human-feel/${humanChapter}/issues/${encodeURIComponent(issue.id)}`,
+                        { decision: "rejected" },
+                      ),
+                      "已拒绝此问题，保留审计记录。",
+                    )}
+                  >
+                    <X size={14} /> 拒绝问题
+                  </ActionButton>
+                  <ActionButton
+                    variant="outline"
+                    busy={props.busy === `${issue.id}:lock`}
+                    onClick={() => props.act(
+                      `${issue.id}:lock`,
+                      () => postApi(
+                        `${props.path}/human-feel/${humanChapter}/paragraphs/${issue.paragraphIndex}/lock`,
+                        { locked: true },
+                      ),
+                      `第 ${issue.paragraphIndex + 1} 段已锁定，真人感重审将跳过该段。`,
+                    )}
+                  >
+                    <Lock size={14} /> 锁定段落
+                  </ActionButton>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AutomationPanel(props: PanelProps) {
+  const config = props.data.automation.config;
+  const runtime = props.data.automation.runtime;
+  return (
+    <section className="space-y-5">
+      <div>
+        <h2 className="text-xl">单书自动化</h2>
+        <p className="mt-1 text-sm text-muted-foreground">默认关闭。人工编辑、stale Spec、待批大纲和投影失败都会阻止自动写章。</p>
+      </div>
+      <div className="rounded-xl border border-border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-4 py-4">
+          <div>
+            <p className="text-sm font-medium">{config.enabled ? "已允许守护进程调度" : "未加入自动写作队列"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">今天已写 {runtime.dailyCount} 章</p>
+          </div>
+          <ActionButton
+            busy={props.busy === "automation-enabled"}
+            variant={config.enabled ? "outline" : "default"}
+            onClick={() => props.act(
+              "automation-enabled",
+              () => putApi(`${props.path}/automation`, { enabled: !config.enabled }),
+              config.enabled ? "单书自动化已关闭。" : "单书自动化已启用。",
+            )}
+          >
+            {config.enabled ? <Pause size={14} /> : <Play size={14} />}
+            {config.enabled ? "关闭自动化" : "启用自动化"}
+          </ActionButton>
+        </div>
+        <dl className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
+          <AutomationValue label="优先级" value={config.priority} />
+          <AutomationValue label="每轮章数" value={config.chaptersPerCycle} />
+          <AutomationValue label="单书每日上限" value={config.maxChaptersPerDay} />
+          <AutomationValue label="最小间隔" value={`${config.minIntervalMinutes} 分钟`} />
+        </dl>
+      </div>
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">运行保护</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {runtime.paused ? `已暂停：${runtime.pauseReason ?? "无原因"}` : runtime.editing ? "人工编辑中" : "可参与资格检查"}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <ActionButton
+              busy={props.busy === "pause"}
+              variant="outline"
+              onClick={() => props.act(
+                "pause",
+                () => postApi(`${props.path}/automation-state`, { paused: !runtime.paused, reason: "Studio manual pause" }),
+                runtime.paused ? "已恢复调度资格。" : "已持久暂停。",
+              )}
+            >
+              {runtime.paused ? <Play size={14} /> : <Pause size={14} />}
+              {runtime.paused ? "恢复调度" : "暂停调度"}
+            </ActionButton>
+            <ActionButton
+              busy={props.busy === "editing"}
+              variant="outline"
+              onClick={() => props.act(
+                "editing",
+                () => postApi(`${props.path}/automation-state`, { editing: !runtime.editing }),
+                runtime.editing ? "已退出人工编辑保护。" : "已进入人工编辑保护。",
+              )}
+            >
+              <Lock size={14} /> {runtime.editing ? "结束编辑" : "标记编辑中"}
+            </ActionButton>
+          </div>
+        </div>
+        {runtime.lastError && <p className="mt-3 text-sm text-destructive">{runtime.lastError}</p>}
+      </div>
+    </section>
+  );
+}
+
+function PublishingPanel(props: PanelProps) {
+  const [platform, setPlatform] = useState<"fanqie" | "qidian">("fanqie");
+  const [logText, setLogText] = useState("");
+  const records = props.data.publications.filter((record) => record.platform === platform);
+  return (
+    <section className="space-y-5">
+      <div>
+        <h2 className="text-xl">发布导出</h2>
+        <p className="mt-1 text-sm text-muted-foreground">只导出 accepted Commit。生成 ZIP 不代表发布成功，外部状态必须确认或导入日志。</p>
+      </div>
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4">
+        <label className="text-sm">
+          <span className="mb-1 block text-xs text-muted-foreground">平台</span>
+          <select
+            value={platform}
+            onChange={(event) => setPlatform(event.target.value as "fanqie" | "qidian")}
+            className="rounded-lg border border-input bg-background px-3 py-2"
+          >
+            <option value="fanqie">番茄批量发布助手</option>
+            <option value="qidian">起点发布包</option>
+          </select>
+        </label>
+        <ActionButton
+          busy={props.busy === "publication-export"}
+          onClick={() => props.act(
+            "publication-export",
+            () => postApi(`${props.path}/publication/export`, {
+              platform,
+              format: "zip",
+              chapterFileFormat: "md",
+            }),
+            "发布包已生成，状态仍为 exported。",
+          )}
+        >
+          <Download size={14} /> 生成 ZIP 发布包
+        </ActionButton>
+      </div>
+      <div className="rounded-xl border border-border bg-card">
+        <div className="border-b border-border px-4 py-3">
+          <h3 className="text-base font-semibold">外部状态</h3>
+        </div>
+        <div className="divide-y divide-border">
+          {records.length === 0 && <Empty text="此平台还没有导出记录。" />}
+          {records.map((record) => (
+            <div key={`${record.chapterCommitId}:${record.platform}`} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+              <span className="w-16 font-mono">CH {record.chapterNumber}</span>
+              <span className="min-w-0 flex-1 truncate">{record.exportedFileName ?? record.chapterCommitId}</span>
+              <StatusBadge value={record.status} />
+              {record.status === "exported" && (
+                <ActionButton
+                  size="sm"
+                  variant="outline"
+                  busy={props.busy === `publication-handoff:${record.chapterCommitId}`}
+                  onClick={() => props.act(
+                    `publication-handoff:${record.chapterCommitId}`,
+                    () => postApi(`${props.path}/publication/${record.chapterNumber}/status`, {
+                      platform,
+                      chapterCommitId: record.chapterCommitId,
+                      status: "handed_to_extension",
+                    }),
+                    `第 ${record.chapterNumber} 章已确认交给外部助手。`,
+                  )}
+                >
+                  确认交付
+                </ActionButton>
+              )}
+              {record.status === "handed_to_extension" && (
+                <ActionButton
+                  size="sm"
+                  busy={props.busy === `publication-success:${record.chapterCommitId}`}
+                  onClick={() => props.act(
+                    `publication-success:${record.chapterCommitId}`,
+                    () => postApi(`${props.path}/publication/${record.chapterNumber}/status`, {
+                      platform,
+                      chapterCommitId: record.chapterCommitId,
+                      status: "published_external",
+                    }),
+                    `第 ${record.chapterNumber} 章已由人工确认发布成功。`,
+                  )}
+                >
+                  确认发布成功
+                </ActionButton>
+              )}
+              {!["published_external", "failed_external"].includes(record.status) && (
+                <ActionButton
+                  size="sm"
+                  variant="ghost"
+                  busy={props.busy === `publication-failed:${record.chapterCommitId}`}
+                  onClick={() => props.act(
+                    `publication-failed:${record.chapterCommitId}`,
+                    () => postApi(`${props.path}/publication/${record.chapterNumber}/status`, {
+                      platform,
+                      chapterCommitId: record.chapterCommitId,
+                      status: "failed_external",
+                    }),
+                    `第 ${record.chapterNumber} 章已标记为外部发布失败。`,
+                  )}
+                >
+                  标记失败
+                </ActionButton>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-xl border border-border bg-card p-4">
+        <label className="text-sm font-medium" htmlFor="external-publication-log">导入外部助手日志</label>
+        <textarea
+          id="external-publication-log"
+          value={logText}
+          onChange={(event) => setLogText(event.target.value)}
+          rows={5}
+          placeholder="粘贴 JSON 日志，或包含“第1章 上传成功”的文本日志"
+          className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+        />
+        <ActionButton
+          busy={props.busy === "publication-log"}
+          variant="outline"
+          disabled={!logText.trim()}
+          onClick={() => props.act(
+            "publication-log",
+            () => postApi(`${props.path}/publication/import-log`, { platform, log: logText }),
+            "外部日志已导入，匹配章节的状态已更新。",
+          )}
+        >
+          <Upload size={14} /> 导入发布日志
+        </ActionButton>
+      </div>
+    </section>
+  );
+}
+
+interface PanelProps {
+  readonly data: StoryWorkbenchData;
+  readonly path: string;
+  readonly busy: string | null;
+  readonly act: (key: string, action: () => Promise<unknown>, message: string) => Promise<void>;
+}
+
+function QualitySummary({ label, report }: { readonly label: string; readonly report?: QualityReport }) {
+  return (
+    <div className="min-w-[180px] flex-1 rounded-xl border border-border bg-card px-4 py-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      {report ? (
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <span className="text-2xl font-semibold">{report.score ?? "已生成"}</span>
+          <StatusBadge value={report.level ?? report.verdict ?? report.finalStatus ?? "report"} />
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-muted-foreground">暂无报告</p>
+      )}
+    </div>
+  );
+}
+
+function AutomationValue({ label, value }: { readonly label: string; readonly value: string | number }) {
+  return (
+    <div className="bg-card px-4 py-3">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 text-sm font-medium">{value}</dd>
+    </div>
+  );
+}
+
+function ActionButton({
+  busy,
+  children,
+  disabled,
+  ...props
+}: React.ComponentProps<typeof Button> & { readonly busy?: boolean }) {
+  return (
+    <Button {...props} disabled={disabled || busy}>
+      {busy ? <Loader2 size={14} className="animate-spin" /> : children}
+    </Button>
+  );
+}
+
+function StatusBadge({ value }: { readonly value: string }) {
+  const risky = /block|failed|stale|rejected|overdue|error/i.test(value);
+  const good = /pass|clean|approved|accepted|published_external|done/i.test(value);
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+      risky
+        ? "bg-destructive/10 text-destructive"
+        : good
+          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          : "bg-secondary text-secondary-foreground"
+    }`}>
+      {value}
+    </span>
+  );
+}
+
+function List({
+  values,
+  empty,
+  mono,
+}: {
+  readonly values: ReadonlyArray<string>;
+  readonly empty: string;
+  readonly mono?: boolean;
+}) {
+  if (values.length === 0) return <p className="mt-2 text-sm text-muted-foreground">{empty}</p>;
+  return (
+    <ul className={`mt-2 list-disc space-y-1 pl-5 text-sm ${mono ? "font-mono text-xs" : ""}`}>
+      {values.map((value) => <li key={value}>{value}</li>)}
+    </ul>
+  );
+}
+
+function Empty({ text }: { readonly text: string }) {
+  return (
+    <div className="px-4 py-8 text-center">
+      <BookOpenCheck size={22} className="mx-auto text-muted-foreground" />
+      <p className="mt-2 text-sm text-muted-foreground">{text}</p>
+    </div>
+  );
+}
+
+function WorkbenchSkeleton() {
+  return (
+    <div aria-label="正在加载故事工作台" className="space-y-5">
+      <div className="h-10 w-56 animate-pulse rounded bg-muted" />
+      <div className="h-11 animate-pulse rounded bg-muted" />
+      <div className="h-64 animate-pulse rounded-xl bg-muted" />
+    </div>
+  );
+}
+
+function collectHumanIssues(report: HumanFeelReport | undefined): ReadonlyArray<HumanFeelIssue> {
+  if (!report) return [];
+  const groups = [
+    report.blockingIssues,
+    report.expositionIssues,
+    report.decorativeEnvironmentIssues,
+    report.genericMetaphorIssues,
+    report.emptyActionIssues,
+    report.redundantThoughtIssues,
+    report.artificialDialogueIssues,
+    report.reactionCouplingIssues,
+    report.sceneStagnationIssues,
+    report.overNeatPlotIssues,
+    report.excessiveExplanationIssues,
+  ];
+  return [...new Map(groups.flatMap((group) => group ?? []).map((issue) => [issue.id, issue])).values()];
+}
+
+function reportChapter(report: QualityReport | undefined): number | null {
+  if (report?.chapter && Number.isInteger(report.chapter)) return report.chapter;
+  const match = report?.reportPath.match(/chapter-(\d+)/);
+  return match?.[1] ? Number(match[1]) : null;
+}

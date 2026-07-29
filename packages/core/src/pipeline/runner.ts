@@ -97,7 +97,7 @@ import {
   evaluateOutlineControl,
   extractNarrativeLogicNodes,
 } from "../narrative-research/index.js";
-import { auditHumanFeel, saveHumanFeelReport } from "../human-feel/index.js";
+import { auditHumanFeel, HumanFeelDecisionStore, saveHumanFeelReport } from "../human-feel/index.js";
 import {
   PayoffLedgerStore,
   ReaderContractStore,
@@ -2159,7 +2159,16 @@ export class PipelineRunner {
       }
     }
 
-    const humanFeelReport = auditHumanFeel(finalContent, { language: pipelineLang });
+    const humanReviewState = await new HumanFeelDecisionStore(bookDir, chapterNumber).load();
+    const humanFeelReport = auditHumanFeel(finalContent, {
+      language: pipelineLang,
+      lockedParagraphs: new Set(humanReviewState.lockedParagraphs),
+      ignoredIssueIds: new Set(
+        Object.entries(humanReviewState.issueDecisions)
+          .filter(([, decision]) => decision === "rejected")
+          .map(([issueId]) => issueId),
+      ),
+    });
     const humanFeelReportPath = await saveHumanFeelReport({
       bookDir,
       chapterNumber,
