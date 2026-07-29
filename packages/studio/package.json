@@ -16,6 +16,7 @@
     "directory": "packages/studio"
   },
   "scripts": {
+    "prepare:workspace-core": "pnpm --filter @inoks-story-webnovel/core build",
     "prepack": "npm run build && node ../../scripts/prepare-package-for-publish.mjs",
     "postpack": "node ../../scripts/restore-package-json.mjs",
     "prepublishOnly": "node ../../scripts/verify-no-workspace-protocol.mjs .",
@@ -27,6 +28,7 @@
     "build:server": "tsc -p tsconfig.server.json",
     "preview": "vite preview",
     "test": "vitest run",
+    "pretypecheck": "pnpm run prepare:workspace-core",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
   },

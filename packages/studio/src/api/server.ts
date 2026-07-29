@@ -6831,6 +6831,6 @@ export async function startStudioServer(
     }
   }
 
-  console.log(`inkOS Studio running on http://localhost:${port}`);
+  console.log(`Inoks Story Webnovel Studio running on http://localhost:${port}`);
   serve({ fetch: app.fetch, port });
 }
