@@ -19,6 +19,7 @@ import type {
   PsychologyState,
 } from "../narrative-research/types.js";
 import type { PayoffEntry, ReaderContract } from "../story-craft/index.js";
+import type { AbstractNarrativeMechanism } from "../benchmark/types.js";
 
 const PLATFORM_PROFILES: Readonly<Record<"fanqie" | "qidian", PlatformProfile>> = {
   fanqie: {
@@ -57,6 +58,7 @@ export async function compileWritingContract(params: {
   readonly chapterSpec: ChapterSpec;
   readonly readerContract?: ReaderContract;
   readonly payoffTargets?: ReadonlyArray<PayoffEntry>;
+  readonly benchmarkGuidance?: ReadonlyArray<AbstractNarrativeMechanism>;
   readonly inheritedConstraints?: Partial<StoryConstraintSet>;
   readonly proseRules?: ReadonlyArray<string>;
   readonly emotionalTrajectory?: EmotionTrajectory;
@@ -75,6 +77,7 @@ export async function compileWritingContract(params: {
     constraints,
     platformProfile: resolvePlatformProfile(params.platform),
     readerContract: params.readerContract ?? emptyReaderContract(compiledAt),
+    benchmarkGuidance: params.benchmarkGuidance ?? [],
     payoffTargets: params.payoffTargets ?? [],
     chapterSpec: params.chapterSpec,
     sceneContracts: params.chapterSpec.sceneContracts,
@@ -130,6 +133,12 @@ export function renderCompiledWritingContract(contract: CompiledWritingContract)
       "## Due Payoff Targets",
       ...contract.payoffTargets.map((target) =>
         `- ${target.id}: ${target.promise}；窗口=${target.targetWindow.from}-${target.targetWindow.to}；状态=${target.status}`),
+    ] : []),
+    ...(contract.benchmarkGuidance.length > 0 ? [
+      "",
+      "## Approved Benchmark Mechanisms（只迁移机制）",
+      ...contract.benchmarkGuidance.map((mechanism) =>
+        `- ${mechanism.name}: ${mechanism.requiredBeats.join(" → ")}；禁止复用=${mechanism.prohibitedSourceDetails.join("、") || "任何来源专有细节"}`),
     ] : []),
     "",
     "## Hard Constraints",

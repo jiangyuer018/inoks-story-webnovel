@@ -5,6 +5,7 @@ import type {
   PsychologyState,
 } from "../narrative-research/types.js";
 import type { PayoffEntry, ReaderContract } from "../story-craft/index.js";
+import type { AbstractNarrativeMechanism } from "../benchmark/types.js";
 
 export type StoryConstraintStrength = "hard" | "soft" | "open";
 export type StorySpecStatus = "draft" | "approved" | "stale" | "superseded";
@@ -148,6 +149,7 @@ export interface CompiledWritingContract {
   readonly constraints: StoryConstraintSet;
   readonly platformProfile: PlatformProfile;
   readonly readerContract: ReaderContract;
+  readonly benchmarkGuidance: ReadonlyArray<AbstractNarrativeMechanism>;
   readonly payoffTargets: ReadonlyArray<PayoffEntry>;
   readonly chapterSpec: ChapterSpec;
   readonly sceneContracts: ReadonlyArray<SceneContract>;

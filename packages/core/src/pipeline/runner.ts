@@ -104,6 +104,7 @@ import {
   auditPayoff,
   savePayoffAudit,
 } from "../story-craft/index.js";
+import { BenchmarkStore } from "../benchmark/index.js";
 
 const SEQUENCE_LEVEL_CATEGORIES = new Set([
   "Pacing Monotony", "节奏单调",
@@ -2169,6 +2170,8 @@ export class PipelineRunner {
     let missingLogicPassed = true;
     let payoffPassed = true;
     let payoffReportPath: string | undefined;
+    let similarityPassed = true;
+    let similarityReportPath: string | undefined;
     const compiledWritingContract = writeInput.compiledWritingContract;
     if (compiledWritingContract) {
       this.logStage(stageLanguage, {
@@ -2197,6 +2200,13 @@ export class PipelineRunner {
         chapter: chapterNumber,
         audit: payoffAudit,
       });
+      const benchmarkStore = new BenchmarkStore(bookDir);
+      const similarityReport = await benchmarkStore.analyzeSimilarity(finalContent);
+      similarityPassed = similarityReport.verdict !== "block";
+      similarityReportPath = await benchmarkStore.saveSimilarityReport(
+        chapterNumber,
+        similarityReport,
+      );
       emotionPassed = emotionAudit?.verdict !== "block";
       missingLogicPassed = !missingLogicIssues.some((issue) => issue.severity === "blocking");
       const convergence = await runStoryConvergence({
@@ -2255,6 +2265,13 @@ export class PipelineRunner {
             details: payoffAudit.issues
               .filter((issue) => issue.severity === "blocking")
               .map((issue) => issue.message),
+          },
+          {
+            gate: "benchmark-similarity",
+            passed: similarityPassed,
+            blocking: true,
+            details: similarityReport.flaggedPassages.map((flag) =>
+              `${flag.reason}: ${flag.candidateExcerpt}`),
           },
         ],
       });
@@ -2505,6 +2522,7 @@ export class PipelineRunner {
         emotionPassed,
         structurePassed: missingLogicPassed,
         payoffPassed,
+        similarityPassed,
       },
       candidates: extraction,
       stateDeltas: extraction.stateDeltas,
@@ -2542,6 +2560,9 @@ export class PipelineRunner {
         proseQualityReport: relativeToBookDir(bookDir, proseQualityResult.reportPath),
         humanFeelReport: humanFeelReportPath,
         payoffReport: payoffReportPath,
+        similarityReport: similarityReportPath
+          ? relativeToBookDir(bookDir, similarityReportPath)
+          : undefined,
         auditSummary: auditResult.summary,
         reviewMode: this.config.chapterReviewMode ?? "auto",
       },
@@ -3995,11 +4016,13 @@ ${matrix}`,
       intent: params.intent,
       memo: params.memo,
     });
-    const [dynamicPlotState, eventGraph, readerContract, payoffTargets] = await Promise.all([
+    const benchmarkStore = new BenchmarkStore(params.bookDir);
+    const [dynamicPlotState, eventGraph, readerContract, payoffTargets, benchmarkGuidance] = await Promise.all([
       new DynamicPlotStateStore(params.bookDir).load(),
       new EventCausalGraphStore(params.bookDir).load(),
       new ReaderContractStore(params.bookDir).ensure(),
       new PayoffLedgerStore(params.bookDir).dueAt(params.chapterNumber),
+      benchmarkStore.approvedMechanisms(),
     ]);
     const emotionalTrajectory = createDefaultEmotionTrajectory({
       id: spec.emotionalTrajectoryId,
@@ -4013,6 +4036,7 @@ ${matrix}`,
       chapterSpec: spec,
       readerContract,
       payoffTargets,
+      benchmarkGuidance,
       emotionalTrajectory,
       dynamicPlotState,
       relevantEventGraph: eventGraph.slice(-20),
