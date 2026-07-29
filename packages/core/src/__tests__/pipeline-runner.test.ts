@@ -366,6 +366,9 @@ describe("PipelineRunner", () => {
             provider: "custom",
             baseUrl: "https://shared.example/v1",
             apiKeyEnv: "TEST_KEY_A",
+            temperature: 0.9,
+            maxTokens: 7000,
+            fallbackModels: ["writer-backup"],
           },
           auditor: {
             model: "auditor-model",
@@ -378,7 +381,11 @@ describe("PipelineRunner", () => {
 
       const resolveOverride = (
         runner as unknown as {
-          resolveOverride: (agent: string) => { model: string; client: unknown };
+          resolveOverride: (agent: string) => {
+            model: string;
+            client: unknown;
+            callPolicy?: { temperature?: number; maxTokens?: number; fallbackModels?: string[] };
+          };
         }
       ).resolveOverride.bind(runner);
 
@@ -386,6 +393,11 @@ describe("PipelineRunner", () => {
       const auditorOverride = resolveOverride("auditor");
 
       expect(writerOverride.client).not.toBe(auditorOverride.client);
+      expect(writerOverride.callPolicy).toEqual({
+        temperature: 0.9,
+        maxTokens: 7000,
+        fallbackModels: ["writer-backup"],
+      });
     } finally {
       if (previousKeyA === undefined) delete process.env.TEST_KEY_A;
       else process.env.TEST_KEY_A = previousKeyA;

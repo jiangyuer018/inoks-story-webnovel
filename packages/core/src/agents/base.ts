@@ -12,6 +12,11 @@ export interface AgentContext {
   readonly logger?: Logger;
   readonly onStreamProgress?: OnStreamProgress;
   readonly signal?: AbortSignal;
+  readonly callPolicy?: {
+    readonly temperature?: number;
+    readonly maxTokens?: number;
+    readonly fallbackModels?: ReadonlyArray<string>;
+  };
 }
 
 export abstract class BaseAgent {
@@ -29,11 +34,27 @@ export abstract class BaseAgent {
     messages: ReadonlyArray<LLMMessage>,
     options?: { readonly temperature?: number; readonly maxTokens?: number },
   ): Promise<LLMResponse> {
-    return chatCompletion(this.ctx.client, this.ctx.model, messages, {
+    const temperature = this.ctx.callPolicy?.temperature ?? options?.temperature;
+    const maxTokens = this.ctx.callPolicy?.maxTokens ?? options?.maxTokens;
+    const requestOptions = {
       ...options,
+      ...(temperature === undefined ? {} : { temperature }),
+      ...(maxTokens === undefined ? {} : { maxTokens }),
       onStreamProgress: this.ctx.onStreamProgress,
       signal: this.ctx.signal,
-    });
+    };
+    const models = [this.ctx.model, ...(this.ctx.callPolicy?.fallbackModels ?? [])];
+    let lastError: unknown;
+    for (const model of [...new Set(models)]) {
+      try {
+        return await chatCompletion(this.ctx.client, model, messages, requestOptions);
+      } catch (error) {
+        lastError = error;
+        if (this.ctx.signal?.aborted) throw error;
+        this.log?.warn(`Model ${model} failed${model === models.at(-1) ? "" : "; trying configured fallback"}`);
+      }
+    }
+    throw lastError;
   }
 
   protected async withPromptPackGuidance(basePrompt: string, promptId: string): Promise<string> {
@@ -56,6 +77,8 @@ export abstract class BaseAgent {
     if (this.ctx.client.provider === "openai") {
       return chatCompletion(this.ctx.client, this.ctx.model, messages, {
         ...options,
+        temperature: this.ctx.callPolicy?.temperature ?? options?.temperature,
+        maxTokens: this.ctx.callPolicy?.maxTokens ?? options?.maxTokens,
         webSearch: true,
         onStreamProgress: this.ctx.onStreamProgress,
         signal: this.ctx.signal,

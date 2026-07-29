@@ -669,7 +669,11 @@ export class PipelineRunner {
     };
   }
 
-  private resolveOverride(agentName: string): { model: string; client: LLMClient } {
+  private resolveOverride(agentName: string): {
+    model: string;
+    client: LLMClient;
+    callPolicy?: AgentContext["callPolicy"];
+  } {
     const override = this.config.modelOverrides?.[agentName];
     if (!override) {
       return { model: this.config.model, client: this.config.client };
@@ -679,7 +683,15 @@ export class PipelineRunner {
     }
     // Full override — needs its own client if baseUrl differs
     if (!override.baseUrl) {
-      return { model: override.model, client: this.config.client };
+      return {
+        model: override.model,
+        client: this.config.client,
+        callPolicy: {
+          temperature: override.temperature,
+          maxTokens: override.maxTokens,
+          fallbackModels: override.fallbackModels,
+        },
+      };
     }
     const base = this.config.defaultLLMConfig;
     const provider = override.provider ?? base?.provider ?? "custom";
@@ -707,18 +719,26 @@ export class PipelineRunner {
         baseUrl: override.baseUrl,
         apiKey,
         model: override.model,
-        temperature: base?.temperature ?? 0.7,
+        temperature: override.temperature ?? base?.temperature ?? 0.7,
         thinkingBudget: base?.thinkingBudget ?? 0,
         apiFormat,
         stream,
       });
       this.agentClients.set(cacheKey, client);
     }
-    return { model: override.model, client };
+    return {
+      model: override.model,
+      client,
+      callPolicy: {
+        temperature: override.temperature,
+        maxTokens: override.maxTokens,
+        fallbackModels: override.fallbackModels,
+      },
+    };
   }
 
   private agentCtxFor(agent: string, bookId?: string): AgentContext {
-    const { model, client } = this.resolveOverride(agent);
+    const { model, client, callPolicy } = this.resolveOverride(agent);
     return {
       client,
       model,
@@ -727,6 +747,7 @@ export class PipelineRunner {
       logger: this.config.logger?.child(agent),
       onStreamProgress: this.config.onStreamProgress,
       signal: this.currentAbortSignal(),
+      callPolicy,
     };
   }
 

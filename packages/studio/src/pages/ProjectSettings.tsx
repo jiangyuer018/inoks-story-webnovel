@@ -135,6 +135,7 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
   const { data: modeData, refetch: refetchMode } = useApi<{ mode: "legacy" | "v2" }>("/project/input-governance-mode");
   const { data: detectionData, refetch: refetchDetection } = useApi<{ detection: unknown | null }>("/project/detection");
   const { data: qualityData, refetch: refetchQuality } = useApi<{
+    automationMode: "manual" | "review-first" | "auto-draft" | "auto-publish";
     proseQuality: ProseQualitySettings;
     longFormMemory: LongFormMemorySettings;
   }>("/project/prose-quality");
@@ -147,6 +148,7 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
   const [overrideRows, setOverrideRows] = useState<OverrideRow[]>([]);
   const [notifyChannels, setNotifyChannels] = useState<NotifyChannelDraft[]>([]);
   const [det, setDet] = useState<DetectionDraft>({ ...DEFAULT_DETECTION });
+  const [automationMode, setAutomationMode] = useState<"manual" | "review-first" | "auto-draft" | "auto-publish">("review-first");
   const [proseQuality, setProseQuality] = useState<ProseQualitySettings | null>(null);
   const [longFormMemory, setLongFormMemory] = useState<LongFormMemorySettings | null>(null);
   const [skillDraft, setSkillDraft] = useState<SkillDraft>(() => createEmptySkillDraft());
@@ -171,8 +173,26 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
     if (!overridesData) return;
     setOverrideRows(Object.entries(overridesData.overrides ?? {}).map(([agent, val]) => {
       if (typeof val === "string") return { agent, model: val };
-      const { model, ...rest } = (val ?? {}) as { model?: string };
-      return { agent, model: model ?? "", rest };
+      const {
+        model,
+        temperature,
+        maxTokens,
+        fallbackModels,
+        ...rest
+      } = (val ?? {}) as {
+        model?: string;
+        temperature?: number;
+        maxTokens?: number;
+        fallbackModels?: string[];
+      };
+      return {
+        agent,
+        model: model ?? "",
+        temperature,
+        maxTokens,
+        fallbackModels: fallbackModels?.join(", "),
+        rest,
+      };
     }));
   }, [overridesData]);
 
@@ -207,6 +227,7 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
 
   useEffect(() => {
     if (!qualityData) return;
+    setAutomationMode(qualityData.automationMode);
     setProseQuality(qualityData.proseQuality);
     setLongFormMemory(qualityData.longFormMemory);
   }, [qualityData]);
@@ -295,6 +316,28 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
 
       {proseQuality && longFormMemory && (
         <>
+          <SettingsCard
+            title={isZh ? "长篇自动化权限" : "Long-form Automation Authority"}
+            description={isZh
+              ? "模式只决定流程能走到哪一步；任何模式都不能越过正文、连续性、正史或投影阻断。"
+              : "The mode controls how far automation may proceed; no mode bypasses prose, continuity, canon, or projection blockers."}
+            icon={<Bot size={18} />}
+          >
+            <label className="space-y-1 text-sm">
+              <span>{isZh ? "项目默认模式" : "Project default mode"}</span>
+              <select
+                className={fieldClass}
+                value={automationMode}
+                onChange={(event) => setAutomationMode(event.target.value as typeof automationMode)}
+              >
+                <option value="manual">{isZh ? "manual：只按人工命令运行" : "manual: explicit commands only"}</option>
+                <option value="review-first">{isZh ? "review-first：自动草稿，提交前人工确认" : "review-first: human approval before commit"}</option>
+                <option value="auto-draft">{isZh ? "auto-draft：自动生成与审查，不自动发布" : "auto-draft: generate and review, never publish"}</option>
+                <option value="auto-publish">{isZh ? "auto-publish：满足全部门槛后允许发布流" : "auto-publish: publishing flow after every gate"}</option>
+              </select>
+            </label>
+          </SettingsCard>
+
           <SettingsCard
             title={isZh ? "正文质量门" : "Prose Quality Gate"}
             description={isZh
@@ -394,7 +437,7 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
             </div>
             <button
               onClick={() => runSave("prose-quality", async () => {
-                await putApi("/project/prose-quality", { proseQuality, longFormMemory });
+                await putApi("/project/prose-quality", { automationMode, proseQuality, longFormMemory });
                 await refetchQuality();
               }, t("settings.saved"))}
               disabled={saving === "prose-quality"}
@@ -728,27 +771,66 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
             <p className="text-xs text-muted-foreground italic">{t("settings.noOverrides")}</p>
           )}
           {overrideRows.map((row, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <input
-                value={row.agent}
-                onChange={(e) => setOverrideRows((prev) => prev.map((r, j) => (j === i ? { ...r, agent: e.target.value } : r)))}
-                placeholder={t("settings.agentName")}
-                className={`${fieldClass} flex-1`}
-              />
-              <span className="text-muted-foreground">→</span>
-              <input
-                value={row.model}
-                onChange={(e) => setOverrideRows((prev) => prev.map((r, j) => (j === i ? { ...r, model: e.target.value } : r)))}
-                placeholder={t("settings.modelId")}
-                className={`${fieldClass} flex-1 font-mono`}
-              />
-              <button
-                onClick={() => setOverrideRows((prev) => prev.filter((_, j) => j !== i))}
-                className="shrink-0 rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-                aria-label="remove"
-              >
-                <Trash2 size={15} />
-              </button>
+            <div key={i} className="rounded-xl border border-border/60 bg-secondary/15 p-3">
+              <div className="grid items-center gap-2 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto]">
+                <input
+                  value={row.agent}
+                  onChange={(e) => setOverrideRows((prev) => prev.map((r, j) => (j === i ? { ...r, agent: e.target.value } : r)))}
+                  placeholder={t("settings.agentName")}
+                  className={fieldClass}
+                />
+                <input
+                  value={row.model}
+                  onChange={(e) => setOverrideRows((prev) => prev.map((r, j) => (j === i ? { ...r, model: e.target.value } : r)))}
+                  placeholder={t("settings.modelId")}
+                  className={`${fieldClass} font-mono`}
+                />
+                <button
+                  onClick={() => setOverrideRows((prev) => prev.filter((_, j) => j !== i))}
+                  className="shrink-0 rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                  aria-label="remove"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+              <div className="mt-2 grid gap-2 md:grid-cols-3">
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  <span>Temperature</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    value={row.temperature ?? ""}
+                    onChange={(event) => setOverrideRows((prev) => prev.map((item, index) => index === i
+                      ? { ...item, temperature: event.target.value === "" ? undefined : Number(event.target.value) }
+                      : item))}
+                    className={fieldClass}
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  <span>Max tokens</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={row.maxTokens ?? ""}
+                    onChange={(event) => setOverrideRows((prev) => prev.map((item, index) => index === i
+                      ? { ...item, maxTokens: event.target.value === "" ? undefined : Number(event.target.value) }
+                      : item))}
+                    className={fieldClass}
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  <span>{isZh ? "同服务备用模型（逗号分隔）" : "Same-service fallback models"}</span>
+                  <input
+                    value={row.fallbackModels ?? ""}
+                    onChange={(event) => setOverrideRows((prev) => prev.map((item, index) => index === i
+                      ? { ...item, fallbackModels: event.target.value }
+                      : item))}
+                    className={`${fieldClass} font-mono`}
+                  />
+                </label>
+              </div>
             </div>
           ))}
         </div>
@@ -766,7 +848,17 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
                 const agent = r.agent.trim();
                 const model = r.model.trim();
                 if (!agent || !model) continue;
-                overrides[agent] = r.rest && Object.keys(r.rest).length > 0 ? { ...r.rest, model } : model;
+                const fallbackModels = (r.fallbackModels ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+                const hasPolicy = r.temperature !== undefined || r.maxTokens !== undefined || fallbackModels.length > 0;
+                overrides[agent] = hasPolicy || (r.rest && Object.keys(r.rest).length > 0)
+                  ? {
+                      ...r.rest,
+                      model,
+                      ...(r.temperature === undefined ? {} : { temperature: r.temperature }),
+                      ...(r.maxTokens === undefined ? {} : { maxTokens: r.maxTokens }),
+                      ...(fallbackModels.length === 0 ? {} : { fallbackModels }),
+                    }
+                  : model;
               }
               await putApi("/project/model-overrides", { overrides });
               await refetchOverrides();

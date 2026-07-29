@@ -13,6 +13,9 @@ export interface NotifyChannelDraft {
 export interface OverrideRow {
   agent: string;
   model: string;
+  temperature?: number;
+  maxTokens?: number;
+  fallbackModels?: string;
   rest?: Record<string, unknown>;
 }
 

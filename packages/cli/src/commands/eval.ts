@@ -1,8 +1,13 @@
 import { Command } from "commander";
 import {
   StateManager,
+  AblationRunSchema,
+  buildAblationReport,
   evaluateBookQuality,
+  saveAblationReport,
 } from "@inoks-story-webnovel/core";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { findProjectRoot, resolveBookId, log, logError } from "../utils.js";
 
 export const evalCommand = new Command("eval")
@@ -55,5 +60,43 @@ export const evalCommand = new Command("eval")
         logError(`Eval failed: ${e}`);
       }
       process.exit(1);
+    }
+  });
+
+evalCommand
+  .command("ablation")
+  .description("Aggregate paired A-H ablation observations without overstating automated metrics")
+  .requiredOption("--input <file>", "JSON array of ablation runs, or an object with a runs array")
+  .option("--output <file>", "Write the structured report atomically")
+  .option("--json", "Output JSON only")
+  .action(async (
+    options: { input: string; output?: string; json?: boolean },
+    command: Command,
+  ) => {
+    try {
+      const source = JSON.parse(await readFile(resolve(options.input), "utf-8")) as unknown;
+      const candidates = Array.isArray(source)
+        ? source
+        : source && typeof source === "object" && Array.isArray((source as { runs?: unknown }).runs)
+          ? (source as { runs: unknown[] }).runs
+          : null;
+      if (!candidates) throw new Error("Ablation input must be a JSON array or { runs: [...] }");
+      const runs = AblationRunSchema.array().min(1).parse(candidates);
+      const report = buildAblationReport(runs);
+      if (options.output) await saveAblationReport(resolve(options.output), report);
+      const json = Boolean(options.json || command.optsWithGlobals().json);
+      if (json) {
+        log(JSON.stringify(report, null, 2));
+      } else {
+        log(`Ablation report: ${report.interpretationStatus}`);
+        log(`Paired samples: ${report.diagnostics.pairedSampleIds.length}`);
+        log(`Incomplete samples: ${report.diagnostics.incompleteSampleIds.length}`);
+        log(`Human blind ratings complete: ${report.diagnostics.hasHumanBlindRatingsForEveryConfiguration ? "yes" : "no"}`);
+        if (options.output) log(`Saved: ${resolve(options.output)}`);
+        log(report.disclaimer);
+      }
+    } catch (error) {
+      logError(`Ablation evaluation failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
     }
   });

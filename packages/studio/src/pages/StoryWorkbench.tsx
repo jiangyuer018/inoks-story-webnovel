@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BookOpenCheck,
@@ -667,6 +667,8 @@ function QualityPanel(props: PanelProps) {
 function AutomationPanel(props: PanelProps) {
   const config = props.data.automation.config;
   const runtime = props.data.automation.runtime;
+  const [draft, setDraft] = useState(config);
+  useEffect(() => setDraft(config), [config]);
   return (
     <section className="space-y-5">
       <div>
@@ -698,6 +700,30 @@ function AutomationPanel(props: PanelProps) {
           <AutomationValue label="单书每日上限" value={config.maxChaptersPerDay} />
           <AutomationValue label="最小间隔" value={`${config.minIntervalMinutes} 分钟`} />
         </dl>
+      </div>
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <AutomationNumber label="优先级" value={draft.priority} min={0} max={100} onChange={(priority) => setDraft({ ...draft, priority })} />
+          <AutomationNumber label="每轮章数" value={draft.chaptersPerCycle} min={1} max={20} onChange={(chaptersPerCycle) => setDraft({ ...draft, chaptersPerCycle })} />
+          <AutomationNumber label="单书每日上限" value={draft.maxChaptersPerDay} min={1} max={100} onChange={(maxChaptersPerDay) => setDraft({ ...draft, maxChaptersPerDay })} />
+          <AutomationNumber label="最小间隔（分钟）" value={draft.minIntervalMinutes} min={0} max={1440} onChange={(minIntervalMinutes) => setDraft({ ...draft, minIntervalMinutes })} />
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <AutomationToggle label="daemon 启动时运行" checked={draft.runOnDaemonStart} onChange={(runOnDaemonStart) => setDraft({ ...draft, runOnDaemonStart })} />
+          <AutomationToggle label="Commit 前人工批准" checked={draft.requireHumanApprovalBeforeCommit} onChange={(requireHumanApprovalBeforeCommit) => setDraft({ ...draft, requireHumanApprovalBeforeCommit })} />
+          <AutomationToggle label="发布前人工批准" checked={draft.requireHumanApprovalBeforePublish} onChange={(requireHumanApprovalBeforePublish) => setDraft({ ...draft, requireHumanApprovalBeforePublish })} />
+        </div>
+        <ActionButton
+          className="mt-4"
+          busy={props.busy === "automation-policy"}
+          onClick={() => props.act(
+            "automation-policy",
+            () => putApi(`${props.path}/automation`, draft),
+            "单书调度策略已保存。",
+          )}
+        >
+          保存调度策略
+        </ActionButton>
       </div>
       <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -900,6 +926,51 @@ function AutomationValue({ label, value }: { readonly label: string; readonly va
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="mt-1 text-sm font-medium">{value}</dd>
     </div>
+  );
+}
+
+function AutomationNumber({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  readonly label: string;
+  readonly value: number;
+  readonly min: number;
+  readonly max: number;
+  readonly onChange: (value: number) => void;
+}) {
+  return (
+    <label className="space-y-1 text-sm">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="w-full rounded-lg border border-input bg-background px-3 py-2"
+      />
+    </label>
+  );
+}
+
+function AutomationToggle({
+  label,
+  checked,
+  onChange,
+}: {
+  readonly label: string;
+  readonly checked: boolean;
+  readonly onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      {label}
+    </label>
   );
 }
 

@@ -62,3 +62,19 @@ independent native TypeScript implementation built on Inoks Story Webnovel's exi
 manager and SQLite memory database. No Python module is loaded, invoked, or
 shipped as a runtime dependency, and no Python source file was translated
 line-by-line.
+
+## Narrative research references
+
+The Story Spec, causal/temporal audits, emotion trajectory, missing-logic checks, reader
+contracts, and ablation protocol apply general ideas described in publicly available narrative
+planning research. No paper implementation, dataset, model weights, or source code is bundled.
+All schemas, thresholds, prompts, recovery behavior, and TypeScript code were independently
+implemented for this repository.
+
+## Studio prototype boundary
+
+Prototype products and screenshots were used only to understand information density and hierarchy.
+The current Studio shell uses an original function-led navigation structure, CSS-native `inkOS`
+mark, system fonts, color tokens, responsive mobile dock, interaction copy, and component code.
+It does not ship copied prototype logos, remote prototype fonts, platform pages, or third-party
+UI source.

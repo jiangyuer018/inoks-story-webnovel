@@ -574,6 +574,7 @@ export * from "./human-feel/index.js";
 export * from "./story-craft/index.js";
 export * from "./benchmark/index.js";
 export * from "./publishing/index.js";
+export * from "./evaluation/index.js";
 export { Scheduler, type SchedulerConfig } from "./pipeline/scheduler.js";
 export { AutomationStateStore, type AutomationRuntimeState } from "./pipeline/automation-state-store.js";
 export { detectChapter, detectAndRewrite, loadDetectionHistory, type DetectChapterResult, type DetectAndRewriteResult } from "./pipeline/detection-runner.js";

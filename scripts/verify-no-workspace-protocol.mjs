@@ -91,7 +91,7 @@ for (const dirArg of dirs) {
           continue;
         }
         process.stderr.write(
-          `FAIL: ${dir} — ${field}.${name}: ${specifier} (workspace dependency has no prepack version transformer)\n`,
+          `FAIL: ${dir} — ${field}.${name}: ${specifier} (workspace protocol is not allowed without a prepack version transformer)\n`,
         );
         dirFailed = true;
         failed = true;

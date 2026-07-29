@@ -46,6 +46,8 @@ import {
   InputGovernanceModeSchema,
   ProseQualityConfigSchema,
   LongFormMemoryConfigSchema,
+  AutomationModeSchema,
+  AgentLLMOverrideSchema,
   ChapterCommitStore,
   latestProjectionFailures,
   replayStorySystem,
@@ -4149,23 +4151,26 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       ? raw.writing as Record<string, unknown>
       : {};
     return c.json({
+      automationMode: AutomationModeSchema.parse(writing.automationMode ?? "review-first"),
       proseQuality: ProseQualityConfigSchema.parse(writing.proseQuality ?? {}),
       longFormMemory: LongFormMemoryConfigSchema.parse(writing.longFormMemory ?? {}),
     });
   });
 
   app.put("/api/v1/project/prose-quality", async (c) => {
-    const body = await c.req.json<{ proseQuality?: unknown; longFormMemory?: unknown }>();
+    const body = await c.req.json<{ automationMode?: unknown; proseQuality?: unknown; longFormMemory?: unknown }>();
+    const automationMode = AutomationModeSchema.parse(body.automationMode ?? "review-first");
     const proseQuality = ProseQualityConfigSchema.parse(body.proseQuality ?? {});
     const longFormMemory = LongFormMemoryConfigSchema.parse(body.longFormMemory ?? {});
     const raw = await loadRawConfig(root);
     raw.writing = {
       ...(raw.writing && typeof raw.writing === "object" ? raw.writing as Record<string, unknown> : {}),
+      automationMode,
       proseQuality,
       longFormMemory,
     };
     await saveRawConfig(root, raw);
-    return c.json({ ok: true, proseQuality, longFormMemory });
+    return c.json({ ok: true, automationMode, proseQuality, longFormMemory });
   });
 
   app.get("/api/v1/books/:id/quality/prose/:chapter", async (c) => {
@@ -5686,9 +5691,14 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
 
   app.put("/api/v1/project/model-overrides", async (c) => {
     const { overrides } = await c.req.json<{ overrides: Record<string, unknown> }>();
+    const validated = Object.fromEntries(Object.entries(overrides).map(([agent, value]) => {
+      if (!agent.trim()) throw new Error("Agent name cannot be empty");
+      if (typeof value === "string" && value.trim()) return [agent, value.trim()];
+      return [agent, AgentLLMOverrideSchema.parse(value)];
+    }));
     const configPath = join(root, "inoks-story-webnovel.json");
     const raw = JSON.parse(await readFile(configPath, "utf-8"));
-    raw.modelOverrides = overrides;
+    raw.modelOverrides = validated;
     const { writeFile: writeFileFs } = await import("node:fs/promises");
     await writeFileFs(configPath, JSON.stringify(raw, null, 2), "utf-8");
     return c.json({ ok: true });

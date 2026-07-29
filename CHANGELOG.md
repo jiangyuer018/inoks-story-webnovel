@@ -13,6 +13,14 @@
 - 旧章节修改进入 amendment Commit；CLI 新增 `story status / verify / replay / repair / rebuild-index / migrate`，Studio 新增质量配置、章节报告和 Story System 状态/修复入口
 - 新增 `THIRD_PARTY_NOTICES.md`，保留 oh-story MIT 归属并说明 webnovel-writer GPLv3 设计参考边界
 
+### 中文商业网文 V2 控制链
+
+- 新增 Story Constitution / Chapter Spec、因果与时间审计、情绪轨迹、缺失逻辑补全、读者合同和兑现账本，并在最终正文确认后才进入事实提取
+- 新增 Human Feel Engine、人工问题接受/拒绝与段落锁；对标模块只向 Writer 暴露人工批准的抽象机制和相似度保护
+- 新增多书公平调度、显式每书启用/暂停/编辑状态，以及 accepted Commit 驱动的番茄/起点发布包和外部状态日志
+- Studio 使用原创信息架构、CSS 标识和响应式控制台重构，移除旧原型式 Logo/侧栏；新增生产链总览、正史预检、自动化与发布控制
+- 新增 A–H 配对消融聚合器；自动指标与人工盲评分离，缺少完整人评时只输出 engineering-only 诊断
+
 ## v1.7.1
 
 ### Release Focus

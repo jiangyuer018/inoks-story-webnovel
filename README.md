@@ -8,9 +8,11 @@ Inoks Story Webnovel 是一个 TypeScript 单体工作区，提供 CLI 与 Studi
 
 长篇创作最容易失控的地方，通常不是模型能不能继续写，而是：修订后的正文和记忆是否一致、旧伏笔是否仍然有效、状态文件是否被半途更新，以及章节越多时上下文是否越来越臃肿。
 
-Inoks Story Webnovel 将这些风险拆成两个原生模块：
+Inoks Story Webnovel 将这些风险拆成一条原生控制链：
 
 - **Prose Quality Gate**：对中文正文进行确定性扫描；只对高确定性模板化表达阻断，对密度和节奏问题给出建议。必要时才进入最多两轮的最小化自然化修订。
+- **Story Spec 与 Narrative Research**：把章节合同、事件因果、时间、情绪轨迹、缺失逻辑和读者兑现窗口转成写前约束与写后审计。
+- **Human Feel 与 Benchmark Transfer**：用场内动作、对话、选择和后果检查叙事功能；只迁移用户合法文本中的抽象机制。
 - **Story System**：以 `accepted ChapterCommit` 与规范化事件为唯一正史来源。状态、伏笔、章节摘要、MemoryDB 和检索索引全部是可重建投影。
 
 这意味着：正文未通过质量门时，不会污染人物状态、时间线、伏笔或长期记忆；投影失败时，已接受的章节提交仍会保留并可恢复。
@@ -104,6 +106,7 @@ inoks-story story status 我的长篇
 ```json
 {
   "writing": {
+    "automationMode": "review-first",
     "proseQuality": {
       "enabled": true,
       "enforcement": "strict",
@@ -161,6 +164,33 @@ inoks-story story migrate <book-id> --apply
 ```
 
 `story replay` 可以重建当前状态、伏笔、摘要、MemoryDB、实体关系和检索索引。它不会把摘要当作正史事实。
+
+## 发布与评测
+
+```bash
+# 只导出 accepted Commit，并显式追踪外部发布状态
+inoks-story publish export <book-id> --platform fanqie --format zip
+inoks-story publish status <book-id>
+inoks-story publish import-log <book-id> --platform fanqie --file upload.log
+
+# 聚合 A-H 配对消融；自动指标不能替代人工盲评
+inoks-story eval ablation --input ablation-runs.json --output ablation-report.json
+```
+
+Studio 已按生产职责重新构造为原创控制面：生产、连载作品、研究资产、运行治理，以及作品内的规格、质量、正史和发布链。未复制原型项目的 Logo、远程字体、布局代码或平台页面。
+
+## 架构与使用文档
+
+- [Story Spec](docs/architecture/story-spec-system.md)
+- [Narrative Research Layer](docs/architecture/narrative-research-layer.md)
+- [Human Feel Engine](docs/architecture/human-feel-engine.md)
+- [Benchmark Mechanism Transfer](docs/architecture/benchmark-engine.md)
+- [ChapterCommit Story System](docs/architecture/chapter-commit-system.md)
+- [Publishing Export](docs/architecture/publishing-export.md)
+- [旧书迁移](docs/migration/v2-story-system.md)
+- [A-H 消融评测](docs/testing/ablation.md)
+- [Studio 故事控制中心](docs/user-guide/studio-control-center.md)
+- [V2 配置](docs/user-guide/configuration.md)
 
 ## 目录说明
 
