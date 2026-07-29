@@ -13,6 +13,13 @@ import type {
   ChapterCommitProjectionPayload,
   StoryProjectionResult,
 } from "./types.js";
+import {
+  DynamicPlotStateStore,
+  EventCausalGraphStore,
+  TemporalKnowledgeGraphStore,
+  listFutureSpecIds,
+  proposeOutlineRevisionFromCommit,
+} from "../narrative-research/index.js";
 
 export type StoryProjector = (commit: ChapterCommit) => Promise<Record<string, unknown> | void>;
 
@@ -76,9 +83,37 @@ export function createDefaultProjectionManager(
     .register("hooks", (commit) => projectHooks(bookDir, commit))
     .register("entity", (commit) => projectEntityIndex(bookDir, commit))
     .register("relationship", (commit) => projectRelationshipIndex(bookDir, commit))
+    .register("causalGraph", (commit) => new EventCausalGraphStore(bookDir).projectCommit(commit))
+    .register("temporalGraph", (commit) => new TemporalKnowledgeGraphStore(bookDir).projectCommit(commit))
+    .register("dynamicPlotState", (commit) => projectDynamicPlotState(bookDir, commit))
+    .register("dynamicOutline", (commit) => projectDynamicOutline(bookDir, commit), false)
     .register("retrievalIndex", (commit) => projectRetrievalIndex(bookDir, commit));
   if (options.afterLegacyProjection) manager.register("legacyCompatibility", options.afterLegacyProjection, false);
   return manager;
+}
+
+async function projectDynamicPlotState(
+  bookDir: string,
+  commit: ChapterCommit,
+): Promise<Record<string, unknown>> {
+  const state = await new DynamicPlotStateStore(bookDir).projectCommit(commit);
+  return {
+    goals: state.currentGoals.length,
+    conflicts: state.activeConflicts.length,
+    decisions: state.unresolvedDecisions.length,
+    expectations: state.activeReaderExpectations.length,
+  };
+}
+
+async function projectDynamicOutline(
+  bookDir: string,
+  commit: ChapterCommit,
+): Promise<Record<string, unknown>> {
+  const futureSpecIds = await listFutureSpecIds(bookDir, commit.chapter);
+  const revision = await proposeOutlineRevisionFromCommit({ bookDir, commit, futureSpecIds });
+  return revision
+    ? { revisionId: revision.id, affectedSpecIds: revision.affectedSpecIds }
+    : { proposed: false };
 }
 
 async function projectAmendmentAudit(

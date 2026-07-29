@@ -142,6 +142,10 @@ export interface CompiledWritingContract {
   readonly chapterSpec: ChapterSpec;
   readonly sceneContracts: ReadonlyArray<SceneContract>;
   readonly activeBeatContracts: ReadonlyArray<ControlledNarrativeBeat>;
+  readonly emotionalTrajectory?: EmotionTrajectory;
+  readonly dynamicPlotState?: DynamicPlotState;
+  readonly characterStates: ReadonlyArray<PsychologyState>;
+  readonly relevantEventGraph: ReadonlyArray<CanonicalEvent>;
   readonly forbiddenChanges: ReadonlyArray<string>;
   readonly proseRules: ReadonlyArray<string>;
   readonly compiledAt: string;
@@ -174,3 +178,9 @@ export interface StoryConvergenceResult {
   readonly specVersion: number;
   readonly createdAt: string;
 }
+import type {
+  CanonicalEvent,
+  DynamicPlotState,
+  EmotionTrajectory,
+  PsychologyState,
+} from "../narrative-research/types.js";

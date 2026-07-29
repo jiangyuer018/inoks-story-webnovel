@@ -88,7 +88,15 @@ import {
   runStoryConvergence,
   type CompiledWritingContract,
 } from "../story-spec/index.js";
-import { evaluateOutlineControl } from "../narrative-research/index.js";
+import {
+  DynamicPlotStateStore,
+  EventCausalGraphStore,
+  auditEmotionTrajectory,
+  createDefaultEmotionTrajectory,
+  detectMissingNarrativeLogic,
+  evaluateOutlineControl,
+  extractNarrativeLogicNodes,
+} from "../narrative-research/index.js";
 
 const SEQUENCE_LEVEL_CATEGORIES = new Set([
   "Pacing Monotony", "节奏单调",
@@ -2154,6 +2162,12 @@ export class PipelineRunner {
         beats: compiledWritingContract.activeBeatContracts,
         allowedStateChanges: compiledWritingContract.chapterSpec.requiredStateChanges,
       });
+      const emotionAudit = compiledWritingContract.emotionalTrajectory
+        ? auditEmotionTrajectory(finalContent, compiledWritingContract.emotionalTrajectory)
+        : undefined;
+      const missingLogicIssues = detectMissingNarrativeLogic(
+        extractNarrativeLogicNodes(finalContent),
+      );
       const convergence = await runStoryConvergence({
         bookDir,
         content: finalContent,
@@ -2176,6 +2190,26 @@ export class PipelineRunner {
             details: auditResult.issues
               .filter((issue) => issue.severity === "critical")
               .map((issue) => issue.description),
+          },
+          {
+            gate: "emotion-trajectory",
+            passed: emotionAudit?.verdict !== "block",
+            blocking: true,
+            details: emotionAudit
+              ? [
+                  ...emotionAudit.missingTransitions,
+                  ...emotionAudit.trajectoryDeviation,
+                ].filter((issue) => issue.severity === "blocking").map((issue) => issue.message)
+              : [],
+          },
+          {
+            gate: "missing-narrative-logic",
+            passed: !missingLogicIssues.some((issue) => issue.severity === "blocking"),
+            blocking: true,
+            details: missingLogicIssues
+              .filter((issue) => issue.severity === "blocking")
+              .map((issue) =>
+                `${issue.fromNode.id} → ${issue.toNode.id}: missing ${issue.missingBridgeTypes.join(", ")}`),
           },
         ],
       });
@@ -3905,10 +3939,23 @@ ${matrix}`,
       intent: params.intent,
       memo: params.memo,
     });
+    const [dynamicPlotState, eventGraph] = await Promise.all([
+      new DynamicPlotStateStore(params.bookDir).load(),
+      new EventCausalGraphStore(params.bookDir).load(),
+    ]);
+    const emotionalTrajectory = createDefaultEmotionTrajectory({
+      id: spec.emotionalTrajectoryId,
+      ownerCharacterId: spec.pov || undefined,
+      goal: spec.chapterGoal,
+      payoffTargets: spec.payoffTargets,
+    });
     return compileWritingContract({
       bookDir: params.bookDir,
       platform: params.book.platform,
       chapterSpec: spec,
+      emotionalTrajectory,
+      dynamicPlotState,
+      relevantEventGraph: eventGraph.slice(-20),
     });
   }
 

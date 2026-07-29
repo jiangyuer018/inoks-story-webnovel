@@ -12,6 +12,12 @@ import type {
   StoryConstraint,
   StoryConstraintSet,
 } from "./types.js";
+import type {
+  CanonicalEvent,
+  DynamicPlotState,
+  EmotionTrajectory,
+  PsychologyState,
+} from "../narrative-research/types.js";
 
 const PLATFORM_PROFILES: Readonly<Record<"fanqie" | "qidian", PlatformProfile>> = {
   fanqie: {
@@ -50,6 +56,10 @@ export async function compileWritingContract(params: {
   readonly chapterSpec: ChapterSpec;
   readonly inheritedConstraints?: Partial<StoryConstraintSet>;
   readonly proseRules?: ReadonlyArray<string>;
+  readonly emotionalTrajectory?: EmotionTrajectory;
+  readonly dynamicPlotState?: DynamicPlotState;
+  readonly characterStates?: ReadonlyArray<PsychologyState>;
+  readonly relevantEventGraph?: ReadonlyArray<CanonicalEvent>;
 }): Promise<CompiledWritingContract> {
   const constitution = await loadStoryConstitution(params.bookDir);
   const constraints = mergeConstraintSets(
@@ -64,6 +74,10 @@ export async function compileWritingContract(params: {
     chapterSpec: params.chapterSpec,
     sceneContracts: params.chapterSpec.sceneContracts,
     activeBeatContracts: params.chapterSpec.beats.filter((beat) => beat.status === "active" || beat.status === "pending"),
+    emotionalTrajectory: params.emotionalTrajectory,
+    dynamicPlotState: params.dynamicPlotState,
+    characterStates: params.characterStates ?? [],
+    relevantEventGraph: params.relevantEventGraph ?? [],
     forbiddenChanges: params.chapterSpec.hardConstraints,
     proseRules: params.proseRules ?? [],
   };
@@ -92,6 +106,12 @@ export function renderCompiledWritingContract(contract: CompiledWritingContract)
     "## Active Beat Contracts",
     ...contract.activeBeatContracts.map((beat) =>
       `- [${beat.strength}] ${beat.id}: ${beat.function}；验收=${beat.completionCriteria.join("/") || "场内可观察后果"}`),
+    ...(contract.emotionalTrajectory ? [
+      "",
+      "## Target Emotion Trajectory",
+      ...contract.emotionalTrajectory.nodes.map((node) =>
+        `- ${node.order}. ${node.emotion}(${node.intensity}) → ${node.beliefState} → ${node.behavioralEffect}`),
+    ] : []),
     "",
     "## Scene Contracts",
     ...contract.sceneContracts.flatMap((scene) => [
@@ -103,6 +123,14 @@ export function renderCompiledWritingContract(contract: CompiledWritingContract)
       `不可逆变化：${scene.irreversibleChange}`,
       `叙事功能：${scene.narrativeFunctions.join("、")}`,
     ]),
+    ...(contract.dynamicPlotState ? [
+      "",
+      "## Dynamic Plot State",
+      `- active goals: ${contract.dynamicPlotState.currentGoals.map((item) => `${item.characterId}:${item.goal}`).join("；") || "无"}`,
+      `- active conflicts: ${contract.dynamicPlotState.activeConflicts.map((item) => `${item.id}:${item.stakes}`).join("；") || "无"}`,
+      `- unresolved decisions: ${contract.dynamicPlotState.unresolvedDecisions.map((item) => item.decision).join("；") || "无"}`,
+      `- immediate threats: ${contract.dynamicPlotState.immediateThreats.map((item) => item.description).join("；") || "无"}`,
+    ] : []),
     "",
     "只在 Open Space 内自由发挥；不得用章末总结冒充 Beat 兑现。",
   ].join("\n");
