@@ -2,10 +2,14 @@ import { PipelineRunner } from "./runner.js";
 import type { PipelineConfig } from "./runner.js";
 import { StateManager } from "../state/manager.js";
 import type { BookConfig } from "../models/book.js";
+import { resolveBookAutomation } from "../models/book.js";
 import type { QualityGates, DetectionConfig } from "../models/project.js";
 import { dispatchWebhookEvent } from "../notify/dispatcher.js";
 import { detectChapter, detectAndRewrite } from "./detection-runner.js";
 import type { Logger } from "../utils/logger.js";
+import { AutomationStateStore, type AutomationRuntimeState } from "./automation-state-store.js";
+import { DynamicOutlineRevisionStore } from "../narrative-research/dynamic-outline-engine.js";
+import { StorySpecStore } from "../story-spec/spec-store.js";
 
 export interface SchedulerConfig extends PipelineConfig {
   readonly radarCron: string;
@@ -37,14 +41,6 @@ export class Scheduler {
   private writeCycleInFlight: Promise<void> | null = null;
   private radarScanInFlight: Promise<void> | null = null;
 
-  // Quality gate tracking (per book)
-  private consecutiveFailures = new Map<string, number>();
-  private pausedBooks = new Set<string>();
-  // Failure clustering: bookId → (dimension → count)
-  private failureDimensions = new Map<string, Map<string, number>>();
-  // Daily chapter counter: "YYYY-MM-DD" → count
-  private dailyChapterCount = new Map<string, number>();
-
   private readonly log?: Logger;
 
   constructor(config: SchedulerConfig) {
@@ -58,8 +54,9 @@ export class Scheduler {
     if (this.running) return;
     this.running = true;
 
-    // Run write cycle immediately on start, then schedule
-    await this.triggerWriteCycle();
+    if (await this.hasRunOnStartBook()) {
+      await this.triggerWriteCycle(true);
+    }
 
     // Schedule recurring write cycle
     const writeCycleMs = this.cronToMs(this.config.writeCron);
@@ -100,13 +97,13 @@ export class Scheduler {
     return this.running;
   }
 
-  private async triggerWriteCycle(): Promise<void> {
+  private async triggerWriteCycle(runOnStartOnly = false): Promise<void> {
     if (this.writeCycleInFlight) {
       this.log?.warn("Write cycle still running, skipping overlapping tick");
       return;
     }
 
-    const cycle = this.runWriteCycle().finally(() => {
+    const cycle = this.runWriteCycle(runOnStartOnly).finally(() => {
       if (this.writeCycleInFlight === cycle) {
         this.writeCycleInFlight = null;
       }
@@ -130,16 +127,30 @@ export class Scheduler {
     await scan;
   }
 
-  /** Resume a paused book. */
-  resumeBook(bookId: string): void {
-    this.pausedBooks.delete(bookId);
-    this.consecutiveFailures.delete(bookId);
-    this.failureDimensions.delete(bookId);
+  async pauseBook(bookId: string, reason = "Paused by user"): Promise<void> {
+    await this.automationStore(bookId).update({ paused: true, pauseReason: reason });
   }
 
-  /** Check if a book is paused. */
-  isBookPaused(bookId: string): boolean {
-    return this.pausedBooks.has(bookId);
+  async resumeBook(bookId: string): Promise<void> {
+    await this.automationStore(bookId).update({
+      paused: false,
+      pauseReason: undefined,
+      consecutiveFailures: 0,
+      failureDimensions: {},
+      lastError: undefined,
+    });
+  }
+
+  async setBookEditing(bookId: string, editing: boolean): Promise<void> {
+    await this.automationStore(bookId).update({ editing });
+  }
+
+  async getBookAutomationState(bookId: string): Promise<AutomationRuntimeState> {
+    return this.automationStore(bookId).load();
+  }
+
+  async isBookPaused(bookId: string): Promise<boolean> {
+    return (await this.getBookAutomationState(bookId)).paused;
   }
 
   private get gates(): QualityGates {
@@ -150,56 +161,50 @@ export class Scheduler {
     };
   }
 
-  /** Check if daily cap is reached across all books. */
-  private isDailyCapReached(): boolean {
-    const today = new Date().toISOString().slice(0, 10);
-    const count = this.dailyChapterCount.get(today) ?? 0;
-    return count >= this.config.maxChaptersPerDay;
-  }
-
-  /** Increment daily chapter counter. */
-  private recordChapterWritten(): void {
-    const today = new Date().toISOString().slice(0, 10);
-    const count = this.dailyChapterCount.get(today) ?? 0;
-    this.dailyChapterCount.set(today, count + 1);
-
-    // Clean up old dates (keep only today)
-    for (const key of this.dailyChapterCount.keys()) {
-      if (key !== today) this.dailyChapterCount.delete(key);
-    }
-  }
-
-  private async runWriteCycle(): Promise<void> {
-    if (this.isDailyCapReached()) {
+  private async runWriteCycle(runOnStartOnly = false): Promise<void> {
+    const candidates = await this.loadEligibleBooks(runOnStartOnly);
+    const globalCount = candidates.allStates.reduce((sum, item) => sum + item.state.dailyCount, 0);
+    if (globalCount >= this.config.maxChaptersPerDay) {
       this.log?.info(`Daily cap reached (${this.config.maxChaptersPerDay}), skipping cycle`);
       return;
     }
 
-    const bookIds = await this.state.listBooks();
+    let remaining = this.config.maxChaptersPerDay - globalCount;
+    const booksToWrite = candidates.eligible
+      .sort((left, right) =>
+        right.automation.priority - left.automation.priority
+        || timestamp(left.state.lastWrittenAt) - timestamp(right.state.lastWrittenAt)
+        || left.id.localeCompare(right.id))
+      .slice(0, this.config.maxConcurrentBooks)
+      .map((book) => {
+        const budget = Math.min(
+          book.automation.chaptersPerCycle,
+          book.automation.maxChaptersPerDay - book.state.dailyCount,
+          remaining,
+        );
+        remaining -= budget;
+        return { ...book, budget };
+      })
+      .filter((book) => book.budget > 0);
 
-    const activeBooks: Array<{ readonly id: string; readonly config: BookConfig }> = [];
-    for (const id of bookIds) {
-      if (this.pausedBooks.has(id)) continue;
-      const config = await this.state.loadBookConfig(id);
-      if (config.status === "active" || config.status === "outlining") {
-        activeBooks.push({ id, config });
-      }
-    }
-
-    const booksToWrite = activeBooks.slice(0, this.config.maxConcurrentBooks);
-
-    // Parallel book processing
     await Promise.all(
-      booksToWrite.map((book) => this.processBook(book.id, book.config)),
+      booksToWrite.map((book) => this.processBook(book.id, book.config, book.state, book.budget)),
     );
   }
 
   /** Process a single book: write chaptersPerCycle chapters with retry + cooldown. */
-  private async processBook(bookId: string, bookConfig: BookConfig): Promise<void> {
-    for (let i = 0; i < this.config.chaptersPerCycle; i++) {
+  private async processBook(
+    bookId: string,
+    bookConfig: BookConfig,
+    initialState: AutomationRuntimeState,
+    chapterBudget: number,
+  ): Promise<void> {
+    const automation = resolveBookAutomation(bookConfig.automation);
+    let runtime = initialState;
+    for (let i = 0; i < chapterBudget; i++) {
       if (!this.running) return;
-      if (this.isDailyCapReached()) return;
-      if (this.pausedBooks.has(bookId)) return;
+      if (runtime.paused || runtime.editing) return;
+      if (runtime.dailyCount >= automation.maxChaptersPerDay) return;
 
       // Cooldown between chapters (skip for the first one)
       if (i > 0 && this.config.cooldownAfterChapterMs > 0) {
@@ -208,8 +213,8 @@ export class Scheduler {
 
       const success = await this.writeOneChapter(bookId, bookConfig);
       if (!success) {
-        // Immediate retry with delay (if within retry limit)
-        const failures = this.consecutiveFailures.get(bookId) ?? 0;
+        runtime = await this.automationStore(bookId).load();
+        const failures = runtime.consecutiveFailures;
         if (failures <= this.gates.maxAuditRetries && this.config.retryDelayMs > 0) {
           this.log?.warn(`${bookId} retrying in ${this.config.retryDelayMs}ms`);
           await this.sleep(this.config.retryDelayMs);
@@ -218,6 +223,8 @@ export class Scheduler {
         } else {
           break; // Stop this book's cycle
         }
+      } else {
+        runtime = await this.automationStore(bookId).load();
       }
     }
   }
@@ -226,7 +233,8 @@ export class Scheduler {
   private async writeOneChapter(bookId: string, bookConfig: BookConfig): Promise<boolean> {
     try {
       // Compute temperature override: base 0.7 + failures * step
-      const failures = this.consecutiveFailures.get(bookId) ?? 0;
+      const runtime = await this.automationStore(bookId).load();
+      const failures = runtime.consecutiveFailures;
       const tempOverride = failures > 0
         ? Math.min(1.2, 0.7 + failures * this.gates.retryTemperatureStep)
         : undefined;
@@ -234,8 +242,13 @@ export class Scheduler {
       const result = await this.pipeline.writeNextChapter(bookId, undefined, tempOverride);
 
       if (result.status === "ready-for-review") {
-        this.consecutiveFailures.delete(bookId);
-        this.recordChapterWritten();
+        await this.automationStore(bookId).update({
+          consecutiveFailures: 0,
+          failureDimensions: {},
+          lastError: undefined,
+          lastWrittenAt: new Date().toISOString(),
+          dailyCount: runtime.dailyCount + 1,
+        });
 
         // Auto-detection loop after successful audit
         if (this.config.detection?.enabled) {
@@ -253,7 +266,7 @@ export class Scheduler {
       return false;
     } catch (e) {
       this.config.onError?.(bookId, e as Error);
-      await this.handleAuditFailure(bookId, 0);
+      await this.handleAuditFailure(bookId, 0, [], e as Error);
       return false;
     }
   }
@@ -291,21 +304,19 @@ export class Scheduler {
     bookId: string,
     chapterNumber: number,
     issueCategories: ReadonlyArray<string> = [],
+    error?: Error,
   ): Promise<void> {
-    const failures = (this.consecutiveFailures.get(bookId) ?? 0) + 1;
-    this.consecutiveFailures.set(bookId, failures);
+    const store = this.automationStore(bookId);
+    const runtime = await store.load();
+    const failures = runtime.consecutiveFailures + 1;
+    const dimensions = { ...runtime.failureDimensions };
 
-    // Track failure dimensions for clustering
     if (issueCategories.length > 0) {
-      const existing = this.failureDimensions.get(bookId);
-      const dimMap = existing ? new Map(existing) : new Map<string, number>();
       for (const cat of issueCategories) {
-        dimMap.set(cat, (dimMap.get(cat) ?? 0) + 1);
+        dimensions[cat] = (dimensions[cat] ?? 0) + 1;
       }
-      this.failureDimensions.set(bookId, dimMap);
 
-      // Check for dimension clustering (any dimension with >=3 failures)
-      for (const [dimension, count] of dimMap) {
+      for (const [dimension, count] of Object.entries(dimensions)) {
         if (count >= 3) {
           await this.emitDiagnosticAlert(bookId, chapterNumber, dimension, count);
         }
@@ -315,14 +326,24 @@ export class Scheduler {
     const gates = this.gates;
 
     if (failures <= gates.maxAuditRetries) {
+      await store.update({
+        consecutiveFailures: failures,
+        failureDimensions: dimensions,
+        lastError: error?.message,
+      });
       this.log?.warn(`${bookId} audit failed (${failures}/${gates.maxAuditRetries}), will retry`);
       return;
     }
 
-    // Check if we should pause
     if (failures >= gates.pauseAfterConsecutiveFailures) {
-      this.pausedBooks.add(bookId);
       const reason = `${failures} consecutive audit failures (threshold: ${gates.pauseAfterConsecutiveFailures})`;
+      await store.update({
+        paused: true,
+        pauseReason: reason,
+        consecutiveFailures: failures,
+        failureDimensions: dimensions,
+        lastError: error?.message,
+      });
       this.log?.error(`${bookId} PAUSED: ${reason}`);
       this.config.onPause?.(bookId, reason);
 
@@ -335,7 +356,76 @@ export class Scheduler {
           data: { reason, consecutiveFailures: failures },
         });
       }
+      return;
     }
+    await store.update({
+      consecutiveFailures: failures,
+      failureDimensions: dimensions,
+      lastError: error?.message,
+    });
+  }
+
+  private async hasRunOnStartBook(): Promise<boolean> {
+    for (const id of await this.state.listBooks()) {
+      const config = await this.state.loadBookConfig(id);
+      const automation = resolveBookAutomation(config.automation);
+      if (automation.enabled && automation.runOnDaemonStart) return true;
+    }
+    return false;
+  }
+
+  private async loadEligibleBooks(runOnStartOnly = false): Promise<{
+    readonly eligible: Array<{
+      readonly id: string;
+      readonly config: BookConfig;
+      readonly automation: ReturnType<typeof resolveBookAutomation>;
+      readonly state: AutomationRuntimeState;
+    }>;
+    readonly allStates: Array<{ readonly id: string; readonly state: AutomationRuntimeState }>;
+  }> {
+    const now = Date.now();
+    const eligible: Array<{
+      id: string;
+      config: BookConfig;
+      automation: ReturnType<typeof resolveBookAutomation>;
+      state: AutomationRuntimeState;
+    }> = [];
+    const allStates: Array<{ id: string; state: AutomationRuntimeState }> = [];
+    for (const id of await this.state.listBooks()) {
+      const [config, runtime] = await Promise.all([
+        this.state.loadBookConfig(id),
+        this.automationStore(id).load(),
+      ]);
+      allStates.push({ id, state: runtime });
+      const automation = resolveBookAutomation(config.automation);
+      if (!automation.enabled || !["active", "outlining"].includes(config.status)) continue;
+      if (runOnStartOnly && !automation.runOnDaemonStart) continue;
+      if (runtime.paused || runtime.editing || runtime.dailyCount >= automation.maxChaptersPerDay) continue;
+      if (automation.requireHumanApprovalBeforeCommit) continue;
+      if (runtime.lastWrittenAt
+        && now - Date.parse(runtime.lastWrittenAt) < automation.minIntervalMinutes * 60_000) continue;
+      if (await this.hasUnapprovedPlanningChange(id)) continue;
+      eligible.push({ id, config, automation, state: runtime });
+    }
+    return { eligible, allStates };
+  }
+
+  private async hasUnapprovedPlanningChange(bookId: string): Promise<boolean> {
+    const bookDir = this.state.bookDir(bookId);
+    const revisions = await new DynamicOutlineRevisionStore(bookDir).list();
+    if (revisions.some((revision) => revision.status === "proposed")) return true;
+    const spec = await new StorySpecStore(bookDir).loadChapter(
+      await this.nextChapterNumber(bookId),
+    );
+    return spec?.status === "stale";
+  }
+
+  private async nextChapterNumber(bookId: string): Promise<number> {
+    return this.state.getNextChapterNumber(bookId);
+  }
+
+  private automationStore(bookId: string): AutomationStateStore {
+    return new AutomationStateStore(this.state.bookDir(bookId));
   }
 
   private async runRadarScan(): Promise<void> {
@@ -407,4 +497,8 @@ export class Scheduler {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+}
+
+function timestamp(value: string | undefined): number {
+  return value ? Date.parse(value) : Number.NEGATIVE_INFINITY;
 }

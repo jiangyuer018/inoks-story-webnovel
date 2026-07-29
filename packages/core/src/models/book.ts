@@ -52,6 +52,30 @@ export type BookStatus = z.infer<typeof BookStatusSchema>;
 export const FanficModeSchema = z.enum(["canon", "au", "ooc", "cp"]);
 export type FanficMode = z.infer<typeof FanficModeSchema>;
 
+export const BookAutomationConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  priority: z.number().int().default(0),
+  chaptersPerCycle: z.number().int().min(1).max(20).default(1),
+  maxChaptersPerDay: z.number().int().min(1).default(10),
+  minIntervalMinutes: z.number().int().min(0).default(15),
+  runOnDaemonStart: z.boolean().default(false),
+  requireHumanApprovalBeforeCommit: z.boolean().default(false),
+  requireHumanApprovalBeforePublish: z.boolean().default(true),
+});
+
+export type BookAutomationConfig = z.infer<typeof BookAutomationConfigSchema>;
+
+export const DEFAULT_BOOK_AUTOMATION: BookAutomationConfig = {
+  enabled: false,
+  priority: 0,
+  chaptersPerCycle: 1,
+  maxChaptersPerDay: 10,
+  minIntervalMinutes: 15,
+  runOnDaemonStart: false,
+  requireHumanApprovalBeforeCommit: false,
+  requireHumanApprovalBeforePublish: true,
+};
+
 export const BookConfigSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -65,6 +89,7 @@ export const BookConfigSchema = z.object({
   updatedAt: z.string().datetime(),
   parentBookId: z.string().optional(),
   fanficMode: FanficModeSchema.optional(),
+  automation: BookAutomationConfigSchema.partial().optional(),
   writing: z.object({
     reviewMode: z.enum(["auto", "manual"]).optional(),
     revisionGate: z.enum(["strict", "lenient", "always"]).optional(),
@@ -102,6 +127,12 @@ export const BookConfigSchema = z.object({
 });
 
 export type BookConfig = z.infer<typeof BookConfigSchema>;
+
+export function resolveBookAutomation(
+  value: BookConfig["automation"],
+): BookAutomationConfig {
+  return BookAutomationConfigSchema.parse(value ?? {});
+}
 
 export type ChapterReviewMode = "auto" | "manual";
 

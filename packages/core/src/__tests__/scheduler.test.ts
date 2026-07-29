@@ -53,6 +53,8 @@ describe("Scheduler", () => {
       });
     vi.spyOn(scheduler as unknown as { runRadarScan: () => Promise<void> }, "runRadarScan")
       .mockResolvedValue(undefined);
+    vi.spyOn(scheduler as unknown as { hasRunOnStartBook: () => Promise<boolean> }, "hasRunOnStartBook")
+      .mockResolvedValue(true);
 
     await scheduler.start();
 
