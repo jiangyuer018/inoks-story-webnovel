@@ -89,6 +89,12 @@ interface LongFormMemorySettings {
   };
 }
 
+interface StorySpecSettings {
+  approvalMode: "human" | "automatic" | "reviewer";
+  blockOnPlaceholders: boolean;
+  requireReaderContract: boolean;
+}
+
 // Smooth open/close via grid-template-rows (same trick as the sidebar).
 function Collapse({ open, children }: { open: boolean; children: React.ReactNode }) {
   return (
@@ -139,6 +145,7 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
     publicationAutomationEnabled: boolean;
     proseQuality: ProseQualitySettings;
     longFormMemory: LongFormMemorySettings;
+    storySpec: StorySpecSettings;
   }>("/project/prose-quality");
   const { data: skillsData, refetch: refetchSkills } = useApi<SkillsResponse>("/skills");
   const { data: promptPacksData, refetch: refetchPromptPacks } = useApi<PromptPacksResponse>("/prompt-packs");
@@ -152,6 +159,7 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
   const [automationMode, setAutomationMode] = useState<"manual" | "review-first" | "auto-draft">("review-first");
   const [proseQuality, setProseQuality] = useState<ProseQualitySettings | null>(null);
   const [longFormMemory, setLongFormMemory] = useState<LongFormMemorySettings | null>(null);
+  const [storySpec, setStorySpec] = useState<StorySpecSettings | null>(null);
   const [skillDraft, setSkillDraft] = useState<SkillDraft>(() => createEmptySkillDraft());
   const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -231,6 +239,7 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
     setAutomationMode(qualityData.automationMode);
     setProseQuality(qualityData.proseQuality);
     setLongFormMemory(qualityData.longFormMemory);
+    setStorySpec(qualityData.storySpec);
   }, [qualityData]);
 
   useEffect(() => {
@@ -315,7 +324,7 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
         </div>
       </SettingsCard>
 
-      {proseQuality && longFormMemory && (
+      {proseQuality && longFormMemory && storySpec && (
         <>
           <SettingsCard
             title={isZh ? "长篇自动化权限" : "Long-form Automation Authority"}
@@ -340,6 +349,53 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
               {isZh
                 ? "外部自动发布当前未启用。系统只会生成可审计的发布包，上传与发布结果必须由人工确认或导入外部日志。"
                 : "Automatic external publishing is disabled. The system only creates auditable publication packages; upload and publication results require human confirmation or an imported external log."}
+            </p>
+          </SettingsCard>
+
+          <SettingsCard
+            title={isZh ? "Story Spec 审批" : "Story Spec Approval"}
+            description={isZh
+              ? "机器规划默认等待人工批准；具体人物、地点、目标、阻力和状态变化不完整时不能进入 Writer。"
+              : "Machine plans wait for review by default; incomplete people, location, goals, opposition, or state change cannot reach Writer."}
+            icon={<FileText size={18} />}
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-1 text-sm">
+                <span>{isZh ? "批准方式" : "Approval mode"}</span>
+                <select
+                  className={fieldClass}
+                  value={storySpec.approvalMode}
+                  onChange={(event) => setStorySpec({
+                    ...storySpec,
+                    approvalMode: event.target.value as StorySpecSettings["approvalMode"],
+                  })}
+                >
+                  <option value="human">{isZh ? "human：人工检查后批准（默认）" : "human: explicit review (default)"}</option>
+                  <option value="reviewer">{isZh ? "reviewer：专用审稿器通过后批准" : "reviewer: dedicated reviewer"}</option>
+                  <option value="automatic">{isZh ? "automatic：合格规划自动批准" : "automatic: approve valid plans"}</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={storySpec.blockOnPlaceholders}
+                  onChange={(event) => setStorySpec({ ...storySpec, blockOnPlaceholders: event.target.checked })}
+                />
+                {isZh ? "占位语或关键字段缺失时阻断" : "Block placeholders and missing fields"}
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={storySpec.requireReaderContract}
+                  onChange={(event) => setStorySpec({ ...storySpec, requireReaderContract: event.target.checked })}
+                />
+                {isZh ? "正式写作前要求完整 Reader Contract" : "Require complete Reader Contract"}
+              </label>
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {isZh
+                ? "reviewer 模式只在专用 Spec Reviewer 明确 pass 时批准；普通 Writer 或 Planner 不能自批。"
+                : "Reviewer mode approves only after a dedicated Spec Reviewer returns pass; Writer and Planner cannot self-approve."}
             </p>
           </SettingsCard>
 
@@ -442,7 +498,7 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
             </div>
             <button
               onClick={() => runSave("prose-quality", async () => {
-                await putApi("/project/prose-quality", { automationMode, proseQuality, longFormMemory });
+                await putApi("/project/prose-quality", { automationMode, proseQuality, longFormMemory, storySpec });
                 await refetchQuality();
               }, t("settings.saved"))}
               disabled={saving === "prose-quality"}

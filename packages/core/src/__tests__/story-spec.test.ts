@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  ReaderContractRequiredError,
+  StorySpecPlaceholderError,
   StorySpecStore,
   compileWritingContract,
   ensureChapterSpec,
@@ -56,6 +58,8 @@ describe("Story Constitution and Fiction Spec", () => {
         body: "## 章尾必须发生的改变\n- 林舟取得通行令\n\n## 读者此刻在等什么\n- 他如何越过封锁",
         threadRefs: [],
       },
+      approvalMode: "automatic",
+      blockOnPlaceholders: false,
     });
     const compiled = await compileWritingContract({
       bookDir,
@@ -70,7 +74,54 @@ describe("Story Constitution and Fiction Spec", () => {
     expect(compiled.forbiddenChanges).toContain("禁止：不能提前揭露内应身份");
 
     const versions = await new StorySpecStore(bookDir).listChapterVersions(1);
-    expect(versions).toHaveLength(1);
+    expect(versions).toHaveLength(2);
+  });
+
+  it("keeps machine-generated specs awaiting review and blocks placeholder approval", async () => {
+    const bookDir = await temporaryBook();
+    const spec = await ensureChapterSpec({
+      bookId: "demo",
+      bookDir,
+      chapterNumber: 4,
+      intent: {
+        chapter: 4,
+        goal: "林舟逼守门官交出通行令",
+        mustKeep: [],
+        mustAvoid: [],
+        styleEmphasis: [],
+      },
+    });
+    expect(spec.status).toBe("awaiting-review");
+    expect(spec.approvedAt).toBeUndefined();
+
+    await expect(new StorySpecStore(bookDir).approveChapter(4, {
+      expectedVersion: spec.version,
+      approvedBy: "human",
+    })).rejects.toBeInstanceOf(StorySpecPlaceholderError);
+  });
+
+  it("requires every Reader Contract promise section in formal writing mode", async () => {
+    const bookDir = await temporaryBook();
+    const spec = await ensureChapterSpec({
+      bookId: "demo",
+      bookDir,
+      chapterNumber: 5,
+      intent: {
+        chapter: 5,
+        goal: "林舟当众验证通行令",
+        mustKeep: [],
+        mustAvoid: [],
+        styleEmphasis: [],
+      },
+      approvalMode: "automatic",
+      blockOnPlaceholders: false,
+    });
+    await expect(compileWritingContract({
+      bookDir,
+      platform: "tomato",
+      chapterSpec: spec,
+      requireReaderContract: true,
+    })).rejects.toBeInstanceOf(ReaderContractRequiredError);
   });
 
   it("does not advance past an unfulfilled hard beat", async () => {

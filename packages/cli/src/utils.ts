@@ -156,6 +156,9 @@ export function buildPipelineConfig(
       || config.writing.automationMode === "review-first"
       ? "human"
       : "automatic",
+    storySpecApprovalMode: config.writing.storySpec.approvalMode,
+    blockOnStorySpecPlaceholders: config.writing.storySpec.blockOnPlaceholders,
+    requireReaderContract: config.writing.storySpec.requireReaderContract,
     revisionGate: extra?.revisionGate,
     modelOverrides: config.modelOverrides,
     inputGovernanceMode: extra?.inputGovernanceMode ?? config.inputGovernanceMode,

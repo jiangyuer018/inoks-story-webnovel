@@ -8,7 +8,15 @@ import type { PayoffEntry, ReaderContract } from "../story-craft/index.js";
 import type { AbstractNarrativeMechanism } from "../benchmark/types.js";
 
 export type StoryConstraintStrength = "hard" | "soft" | "open";
-export type StorySpecStatus = "draft" | "approved" | "stale" | "superseded";
+export type StorySpecStatus =
+  | "generated"
+  | "awaiting-review"
+  | "approved"
+  | "active"
+  | "fulfilled"
+  | "stale"
+  | "superseded";
+export type StorySpecApprovalMode = "human" | "automatic" | "reviewer";
 
 export interface StoryConstraint {
   readonly id: string;
@@ -125,6 +133,7 @@ export interface ChapterSpec {
   readonly sourceIntentHash: string;
   readonly createdAt: string;
   readonly approvedAt?: string;
+  readonly approvedBy?: "human" | "automatic" | "reviewer";
 }
 
 export interface PlatformProfile {

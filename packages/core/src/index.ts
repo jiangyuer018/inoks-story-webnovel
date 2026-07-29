@@ -11,6 +11,7 @@ export {
   type WritingConfig,
   type ProseQualityConfig as ProjectProseQualityConfig,
   type LongFormMemoryConfig as ProjectLongFormMemoryConfig,
+  type StorySpecConfig,
   type AgentLLMOverride,
   type InputGovernanceMode,
   type ResearchSearchConfig,
@@ -23,6 +24,7 @@ export {
   WritingConfigSchema,
   ProseQualityConfigSchema,
   LongFormMemoryConfigSchema,
+  StorySpecConfigSchema,
   AutomationModeSchema as WritingAutomationModeSchema,
   type AutomationMode as WritingAutomationMode,
   InputGovernanceModeSchema,
@@ -578,6 +580,7 @@ export { PipelineRunner, type PipelineConfig, type ChapterPipelineResult, type D
 export * from "./prose-quality/index.js";
 export * from "./story-system/index.js";
 export * from "./story-spec/index.js";
+export * from "./scene-realization/index.js";
 export * from "./narrative-research/index.js";
 export * from "./human-feel/index.js";
 export * from "./story-craft/index.js";

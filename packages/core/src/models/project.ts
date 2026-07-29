@@ -143,6 +143,14 @@ export const LongFormMemoryConfigSchema = z.object({
 
 export type LongFormMemoryConfig = z.infer<typeof LongFormMemoryConfigSchema>;
 
+export const StorySpecConfigSchema = z.object({
+  approvalMode: z.enum(["human", "automatic", "reviewer"]).default("human"),
+  blockOnPlaceholders: z.boolean().default(true),
+  requireReaderContract: z.boolean().default(true),
+});
+
+export type StorySpecConfig = z.infer<typeof StorySpecConfigSchema>;
+
 export const AutomationModeSchema = z.enum(["manual", "review-first", "auto-draft", "auto-publish"]);
 export type AutomationMode = z.infer<typeof AutomationModeSchema>;
 
@@ -151,6 +159,11 @@ export const WritingConfigSchema = z.object({
   reviewMode: z.enum(["auto", "manual"]).default("auto"),
   revisionGate: z.enum(["strict", "lenient", "always"]).default("strict"),
   automationMode: AutomationModeSchema.default("review-first"),
+  storySpec: StorySpecConfigSchema.default({
+    approvalMode: "human",
+    blockOnPlaceholders: true,
+    requireReaderContract: true,
+  }),
   proseQuality: ProseQualityConfigSchema.default({
     enabled: true,
     enforcement: "strict",

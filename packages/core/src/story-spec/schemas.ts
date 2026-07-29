@@ -1,7 +1,18 @@
 import { z } from "zod";
 
 export const StoryConstraintStrengthSchema = z.enum(["hard", "soft", "open"]);
-export const StorySpecStatusSchema = z.enum(["draft", "approved", "stale", "superseded"]);
+export const StorySpecStatusSchema = z.preprocess(
+  (value) => value === "draft" ? "awaiting-review" : value,
+  z.enum([
+    "generated",
+    "awaiting-review",
+    "approved",
+    "active",
+    "fulfilled",
+    "stale",
+    "superseded",
+  ]),
+);
 
 export const StoryConstraintSchema = z.object({
   id: z.string().min(1),
@@ -105,6 +116,7 @@ export const ChapterSpecSchema = z.object({
   sourceIntentHash: z.string().min(1),
   createdAt: z.string().datetime(),
   approvedAt: z.string().datetime().optional(),
+  approvedBy: z.enum(["human", "automatic", "reviewer"]).optional(),
 });
 
 export const PlatformProfileSchema = z.object({

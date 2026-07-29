@@ -4,11 +4,13 @@ import { canonicalJson, sha256 } from "../story-system/commit.js";
 import type { ChapterIntent, ChapterMemo } from "../models/input-governance.js";
 import { ChapterSpecSchema } from "./schemas.js";
 import { storySpecRoot } from "./constitution-loader.js";
+import { detectStorySpecPlaceholders } from "../scene-realization/placeholder-detector.js";
 import type {
   ChapterSpec,
   ControlledNarrativeBeat,
   SceneContract,
   SceneState,
+  StorySpecApprovalMode,
 } from "./types.js";
 
 export interface EnsureChapterSpecInput {
@@ -18,6 +20,37 @@ export interface EnsureChapterSpecInput {
   readonly intent?: ChapterIntent;
   readonly memo?: ChapterMemo;
   readonly targetCharacters?: ReadonlyArray<string>;
+  readonly approvalMode?: StorySpecApprovalMode;
+  readonly blockOnPlaceholders?: boolean;
+}
+
+export class StorySpecApprovalRequiredError extends Error {
+  readonly code = "STORY_SPEC_APPROVAL_REQUIRED";
+
+  constructor(
+    readonly spec: ChapterSpec,
+    readonly specPath: string,
+  ) {
+    super(`Story Spec 第 ${spec.chapterNumber} 章 v${spec.version} 正在等待批准：${specPath}`);
+    this.name = "StorySpecApprovalRequiredError";
+  }
+}
+
+export class StorySpecPlaceholderError extends Error {
+  readonly code = "STORY_SPEC_PLACEHOLDER_BLOCKED";
+
+  constructor(
+    readonly spec: ChapterSpec,
+    readonly placeholders: ReadonlyArray<string>,
+    readonly missingFields: ReadonlyArray<string>,
+  ) {
+    super([
+      `Story Spec 第 ${spec.chapterNumber} 章仍包含占位规划，已阻止进入 Writer。`,
+      placeholders.length > 0 ? `占位语：${placeholders.join("、")}` : "",
+      missingFields.length > 0 ? `缺失字段：${missingFields.join("、")}` : "",
+    ].filter(Boolean).join(" "));
+    this.name = "StorySpecPlaceholderError";
+  }
 }
 
 export class StorySpecStore {
@@ -60,6 +93,7 @@ export class StorySpecStore {
       version: current.version + 1,
       status: "stale",
       approvedAt: undefined,
+      approvedBy: undefined,
       acceptanceCriteria: [
         ...current.acceptanceCriteria,
         {
@@ -72,6 +106,45 @@ export class StorySpecStore {
       createdAt: new Date().toISOString(),
     };
     return this.saveChapter(next);
+  }
+
+  async approveChapter(
+    chapterNumber: number,
+    params: {
+      readonly expectedVersion: number;
+      readonly approvedBy: StorySpecApprovalMode;
+      readonly blockOnPlaceholders?: boolean;
+    },
+  ): Promise<ChapterSpec> {
+    const current = await this.loadChapter(chapterNumber);
+    if (!current) throw new Error(`Story Spec 第 ${chapterNumber} 章不存在`);
+    if (current.version !== params.expectedVersion) {
+      throw new Error(
+        `Story Spec 版本冲突：期望 v${params.expectedVersion}，当前 v${current.version}`,
+      );
+    }
+    if (current.status === "stale" || current.status === "superseded") {
+      throw new Error(`Story Spec 当前状态 ${current.status} 不允许批准`);
+    }
+    if (params.blockOnPlaceholders !== false) {
+      const detection = detectStorySpecPlaceholders(current);
+      if (detection.verdict === "block") {
+        throw new StorySpecPlaceholderError(current, detection.placeholders, detection.missingFields);
+      }
+    }
+    if (current.status === "approved" || current.status === "active") return current;
+    return this.saveChapter({
+      ...current,
+      version: current.version + 1,
+      status: "approved",
+      approvedAt: new Date().toISOString(),
+      approvedBy: params.approvedBy,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  specPath(chapterNumber: number): string {
+    return join(this.chapterDir(chapterNumber), "spec.json");
   }
 
   private chapterDir(chapterNumber: number): string {
@@ -109,11 +182,28 @@ export async function ensureChapterSpec(input: EnsureChapterSpecInput): Promise<
     memo: input.memo ?? null,
   }));
   const current = await store.loadChapter(input.chapterNumber);
-  if (current?.sourceIntentHash === intentHash && current.status !== "superseded") return current;
+  if (current?.sourceIntentHash === intentHash && current.status !== "superseded") {
+    return maybeApprove(current, store, input);
+  }
 
   const nextVersion = (current?.version ?? 0) + 1;
   const spec = buildChapterSpec(input, intentHash, nextVersion);
-  return store.saveChapter(spec);
+  const saved = await store.saveChapter(spec);
+  return maybeApprove(saved, store, input);
+}
+
+async function maybeApprove(
+  spec: ChapterSpec,
+  store: StorySpecStore,
+  input: EnsureChapterSpecInput,
+): Promise<ChapterSpec> {
+  const approvalMode = input.approvalMode ?? "human";
+  if (approvalMode === "human") return spec;
+  return store.approveChapter(spec.chapterNumber, {
+    expectedVersion: spec.version,
+    approvedBy: approvalMode,
+    blockOnPlaceholders: input.blockOnPlaceholders,
+  });
 }
 
 function buildChapterSpec(
@@ -133,7 +223,7 @@ function buildChapterSpec(
   return {
     id,
     version,
-    status: "approved",
+    status: "awaiting-review",
     bookId: input.bookId,
     volumeId: `volume-${String(Math.floor((input.chapterNumber - 1) / 100) + 1).padStart(3, "0")}`,
     arcId: `arc-${String(Math.floor((input.chapterNumber - 1) / 40) + 1).padStart(3, "0")}`,
@@ -169,7 +259,6 @@ function buildChapterSpec(
     beats,
     sourceIntentHash,
     createdAt,
-    approvedAt: createdAt,
   };
 }
 

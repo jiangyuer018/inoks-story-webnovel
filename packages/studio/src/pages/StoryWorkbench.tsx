@@ -37,6 +37,11 @@ interface StoryWorkbenchData {
     readonly chapterGoal: string;
     readonly hardConstraints: ReadonlyArray<string>;
     readonly requiredBeats: ReadonlyArray<string>;
+    readonly planningValidation: {
+      readonly placeholders: ReadonlyArray<string>;
+      readonly missingFields: ReadonlyArray<string>;
+      readonly verdict: "pass" | "block";
+    };
   }>;
   readonly outlineRevisions: ReadonlyArray<{
     readonly id: string;
@@ -250,7 +255,7 @@ export function StoryWorkbench({
           toBook={() => nav.toBook(bookId)}
         />
       )}
-      {tab === "spec" && <SpecPanel data={data} />}
+      {tab === "spec" && <SpecPanel data={data} busy={busy} act={act} path={path} />}
       {tab === "outline" && <OutlinePanel data={data} busy={busy} act={act} path={path} />}
       {tab === "benchmark" && <BenchmarkPanel data={data} busy={busy} act={act} path={path} />}
       {tab === "quality" && <QualityPanel data={data} busy={busy} act={act} path={path} />}
@@ -627,7 +632,8 @@ function CanonicalValue({
   );
 }
 
-function SpecPanel({ data }: { readonly data: StoryWorkbenchData }) {
+function SpecPanel(props: PanelProps) {
+  const { data } = props;
   return (
     <section className="space-y-5">
       <div>
@@ -660,6 +666,39 @@ function SpecPanel({ data }: { readonly data: StoryWorkbenchData }) {
                 <List values={spec.hardConstraints} empty="无额外硬约束" />
                 <p className="mt-4 font-medium">Required Beats</p>
                 <List values={spec.requiredBeats} empty="本章没有人工指定的 hard beat" mono />
+                {spec.planningValidation.verdict === "block" && (
+                  <div className="mt-4 rounded-lg border border-amber-500/35 bg-amber-500/[0.07] p-3">
+                    <p className="flex items-center gap-2 font-medium text-amber-800 dark:text-amber-200">
+                      <AlertTriangle size={14} /> 具体规划尚未通过
+                    </p>
+                    <List
+                      values={spec.planningValidation.placeholders.map((value) => `占位语：${value}`)}
+                      empty=""
+                    />
+                    <List
+                      values={spec.planningValidation.missingFields.map((value) => `缺失：${value}`)}
+                      empty=""
+                      mono
+                    />
+                  </div>
+                )}
+                {spec.status === "awaiting-review" && (
+                  <ActionButton
+                    className="mt-4"
+                    busy={props.busy === `spec:${spec.chapterNumber}:approve`}
+                    disabled={spec.planningValidation.verdict === "block"}
+                    onClick={() => props.act(
+                      `spec:${spec.chapterNumber}:approve`,
+                      () => postApi(
+                        `${props.path}/spec/${spec.chapterNumber}/approve`,
+                        { expectedVersion: spec.version },
+                      ),
+                      `第 ${spec.chapterNumber} 章 Story Spec 已批准。`,
+                    )}
+                  >
+                    <Check size={14} /> 批准 Story Spec
+                  </ActionButton>
+                )}
               </div>
             </details>
           ))}

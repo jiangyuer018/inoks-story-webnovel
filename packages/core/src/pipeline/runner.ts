@@ -328,6 +328,9 @@ export interface PipelineConfig {
    * the canonical ChapterCommit transaction.
    */
   readonly chapterApprovalMode?: "automatic" | "human";
+  readonly storySpecApprovalMode?: "human" | "automatic" | "reviewer";
+  readonly blockOnStorySpecPlaceholders?: boolean;
+  readonly requireReaderContract?: boolean;
   /**
    * Gate for applying manual revisions (default "strict"):
    * - "strict": apply only when blocking/critical/AI-tell counts do not worsen
@@ -4380,6 +4383,8 @@ ${matrix}`,
       chapterNumber: params.chapterNumber,
       intent: params.intent,
       memo: params.memo,
+      approvalMode: this.config.storySpecApprovalMode ?? "automatic",
+      blockOnPlaceholders: this.config.blockOnStorySpecPlaceholders ?? false,
     });
     const benchmarkStore = new BenchmarkStore(params.bookDir);
     const [dynamicPlotState, eventGraph, readerContract, payoffTargets, benchmarkGuidance] = await Promise.all([
@@ -4405,6 +4410,8 @@ ${matrix}`,
       emotionalTrajectory,
       dynamicPlotState,
       relevantEventGraph: eventGraph.slice(-20),
+      requireReaderContract: this.config.requireReaderContract ?? false,
+      blockOnPlaceholders: this.config.blockOnStorySpecPlaceholders ?? false,
     });
   }
 

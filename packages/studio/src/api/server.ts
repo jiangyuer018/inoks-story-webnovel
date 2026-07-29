@@ -47,6 +47,7 @@ import {
   InputGovernanceModeSchema,
   ProseQualityConfigSchema,
   LongFormMemoryConfigSchema,
+  StorySpecConfigSchema,
   WritingAutomationModeSchema,
   AgentLLMOverrideSchema,
   ChapterCommitStore,
@@ -2823,6 +2824,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
         || currentConfig.writing?.automationMode === "review-first"
         ? "human"
         : "automatic",
+      storySpecApprovalMode: currentConfig.writing.storySpec.approvalMode,
+      blockOnStorySpecPlaceholders: currentConfig.writing.storySpec.blockOnPlaceholders,
+      requireReaderContract: currentConfig.writing.storySpec.requireReaderContract,
       revisionGate,
       modelOverrides: currentConfig.modelOverrides,
       notifyChannels: currentConfig.notify,
@@ -4203,11 +4207,17 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       publicationAutomationEnabled: false,
       proseQuality: ProseQualityConfigSchema.parse(writing.proseQuality ?? {}),
       longFormMemory: LongFormMemoryConfigSchema.parse(writing.longFormMemory ?? {}),
+      storySpec: StorySpecConfigSchema.parse(writing.storySpec ?? {}),
     });
   });
 
   app.put("/api/v1/project/prose-quality", async (c) => {
-    const body = await c.req.json<{ automationMode?: unknown; proseQuality?: unknown; longFormMemory?: unknown }>();
+    const body = await c.req.json<{
+      automationMode?: unknown;
+      proseQuality?: unknown;
+      longFormMemory?: unknown;
+      storySpec?: unknown;
+    }>();
     const requestedAutomationMode = WritingAutomationModeSchema.parse(body.automationMode ?? "review-first");
     if (requestedAutomationMode === "auto-publish") {
       return c.json({
@@ -4217,12 +4227,14 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     const automationMode = requestedAutomationMode;
     const proseQuality = ProseQualityConfigSchema.parse(body.proseQuality ?? {});
     const longFormMemory = LongFormMemoryConfigSchema.parse(body.longFormMemory ?? {});
+    const storySpec = StorySpecConfigSchema.parse(body.storySpec ?? {});
     const raw = await loadRawConfig(root);
     raw.writing = {
       ...(raw.writing && typeof raw.writing === "object" ? raw.writing as Record<string, unknown> : {}),
       automationMode,
       proseQuality,
       longFormMemory,
+      storySpec,
     };
     await saveRawConfig(root, raw);
     return c.json({
@@ -4231,6 +4243,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       publicationAutomationEnabled: false,
       proseQuality,
       longFormMemory,
+      storySpec,
     });
   });
 
@@ -4321,6 +4334,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       AutomationStateStore,
       BenchmarkStore,
       DynamicOutlineRevisionStore,
+      detectStorySpecPlaceholders,
       PayoffLedgerStore,
       PublicationStore,
       StorySpecStore,
@@ -4379,7 +4393,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     return c.json({
       bookId: id,
       constitution,
-      specs: specs.filter(Boolean),
+      specs: specs
+        .filter((spec): spec is NonNullable<typeof spec> => Boolean(spec))
+        .map((spec) => ({
+          ...spec,
+          planningValidation: detectStorySpecPlaceholders(spec),
+        })),
       outlineRevisions,
       benchmarkProfiles,
       payoffLedger,
@@ -4415,6 +4434,33 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       ? await approveAndApplyOutlineRevision(state.bookDir(id), c.req.param("revision"))
       : await new DynamicOutlineRevisionStore(state.bookDir(id)).decide(c.req.param("revision"), "rejected");
     return c.json(revision);
+  });
+
+  app.post("/api/v1/books/:id/story-workbench/spec/:chapter/approve", async (c) => {
+    const id = c.req.param("id");
+    const chapter = Number.parseInt(c.req.param("chapter"), 10);
+    if (!isSafeBookId(id) || !Number.isInteger(chapter) || chapter < 1) {
+      throw new ApiError(400, "INVALID_STORY_SPEC", "Invalid book or chapter");
+    }
+    const body = await c.req.json<{ expectedVersion?: unknown }>();
+    if (!Number.isInteger(body.expectedVersion) || Number(body.expectedVersion) < 1) {
+      throw new ApiError(400, "INVALID_STORY_SPEC_VERSION", "expectedVersion must be a positive integer");
+    }
+    const { StorySpecStore } = await import("@inoks-story-webnovel/core");
+    try {
+      const spec = await new StorySpecStore(state.bookDir(id)).approveChapter(chapter, {
+        expectedVersion: Number(body.expectedVersion),
+        approvedBy: "human",
+        blockOnPlaceholders: true,
+      });
+      return c.json(spec);
+    } catch (error) {
+      throw new ApiError(
+        409,
+        "STORY_SPEC_APPROVAL_REJECTED",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   });
 
   app.put("/api/v1/books/:id/story-workbench/benchmark/:source/:mechanism", async (c) => {

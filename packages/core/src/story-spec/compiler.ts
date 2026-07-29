@@ -20,6 +20,7 @@ import type {
 } from "../narrative-research/types.js";
 import type { PayoffEntry, ReaderContract } from "../story-craft/index.js";
 import type { AbstractNarrativeMechanism } from "../benchmark/types.js";
+import { detectStorySpecPlaceholders } from "../scene-realization/placeholder-detector.js";
 
 const PLATFORM_PROFILES: Readonly<Record<"fanqie" | "qidian", PlatformProfile>> = {
   fanqie: {
@@ -65,7 +66,30 @@ export async function compileWritingContract(params: {
   readonly dynamicPlotState?: DynamicPlotState;
   readonly characterStates?: ReadonlyArray<PsychologyState>;
   readonly relevantEventGraph?: ReadonlyArray<CanonicalEvent>;
+  readonly requireReaderContract?: boolean;
+  readonly blockOnPlaceholders?: boolean;
 }): Promise<CompiledWritingContract> {
+  if (params.chapterSpec.status !== "approved" && params.chapterSpec.status !== "active") {
+    throw new Error(
+      `Story Spec ${params.chapterSpec.id}@${params.chapterSpec.version} 未获批准，当前状态：${params.chapterSpec.status}`,
+    );
+  }
+  if (params.blockOnPlaceholders) {
+    const detection = detectStorySpecPlaceholders(params.chapterSpec);
+    if (detection.verdict === "block") {
+      throw new Error([
+        `Story Spec ${params.chapterSpec.id}@${params.chapterSpec.version} 仍含占位规划。`,
+        detection.placeholders.length > 0 ? `占位语：${detection.placeholders.join("、")}` : "",
+        detection.missingFields.length > 0 ? `缺失字段：${detection.missingFields.join("、")}` : "",
+      ].filter(Boolean).join(" "));
+    }
+  }
+  if (params.requireReaderContract) {
+    const missing = missingReaderContractSections(params.readerContract);
+    if (missing.length > 0) {
+      throw new ReaderContractRequiredError(missing);
+    }
+  }
   const constitution = await loadStoryConstitution(params.bookDir);
   const constraints = mergeConstraintSets(
     constitutionConstraints(),
@@ -119,15 +143,17 @@ export function renderCompiledWritingContract(contract: CompiledWritingContract)
     "## Chapter Spec",
     `- spec: ${contract.chapterSpec.id}@${contract.chapterSpec.version}`,
     `- goal: ${contract.chapterSpec.chapterGoal}`,
-    `- pov: ${contract.chapterSpec.pov || "按当前大纲"}`,
-    `- required state changes: ${contract.chapterSpec.requiredStateChanges.join("；") || "至少一项可观察变化"}`,
+    `- pov: ${contract.chapterSpec.pov}`,
+    `- required state changes: ${contract.chapterSpec.requiredStateChanges.join("；")}`,
     "",
     "## Reader Contract",
-    `- core fantasy: ${contract.readerContract.coreFantasy.join("；") || "按 Book Spec"}`,
-    `- progression promises: ${contract.readerContract.progressionPromises.join("；") || "无显式条目"}`,
-    `- relationship promises: ${contract.readerContract.relationshipPromises.join("；") || "无显式条目"}`,
-    `- mystery promises: ${contract.readerContract.mysteryPromises.join("；") || "无显式条目"}`,
-    `- forbidden betrayals: ${contract.readerContract.forbiddenBetrayals.join("；") || "不得无因背叛已建立承诺"}`,
+    `- core fantasy: ${contract.readerContract.coreFantasy.join("；")}`,
+    `- emotional promises: ${contract.readerContract.emotionalPromises.join("；")}`,
+    `- progression promises: ${contract.readerContract.progressionPromises.join("；")}`,
+    `- relationship promises: ${contract.readerContract.relationshipPromises.join("；")}`,
+    `- mystery promises: ${contract.readerContract.mysteryPromises.join("；")}`,
+    `- identity promises: ${contract.readerContract.identityPromises.join("；")}`,
+    `- forbidden betrayals: ${contract.readerContract.forbiddenBetrayals.join("；")}`,
     ...(contract.payoffTargets.length > 0 ? [
       "",
       "## Due Payoff Targets",
@@ -175,6 +201,33 @@ export function renderCompiledWritingContract(contract: CompiledWritingContract)
     "",
     "只在 Open Space 内自由发挥；不得用章末总结冒充 Beat 兑现。",
   ].join("\n");
+}
+
+const READER_CONTRACT_SECTIONS = [
+  "coreFantasy",
+  "emotionalPromises",
+  "progressionPromises",
+  "relationshipPromises",
+  "mysteryPromises",
+  "identityPromises",
+  "forbiddenBetrayals",
+] as const;
+
+export class ReaderContractRequiredError extends Error {
+  readonly code = "READER_CONTRACT_REQUIRED";
+
+  constructor(readonly missingSections: ReadonlyArray<typeof READER_CONTRACT_SECTIONS[number]>) {
+    super(`Reader Contract 不完整，正式写作已阻止。缺失：${missingSections.join("、")}`);
+    this.name = "ReaderContractRequiredError";
+  }
+}
+
+export function missingReaderContractSections(
+  contract: ReaderContract | undefined,
+): ReadonlyArray<typeof READER_CONTRACT_SECTIONS[number]> {
+  if (!contract) return READER_CONTRACT_SECTIONS;
+  return READER_CONTRACT_SECTIONS.filter((key) =>
+    contract[key].map((item) => item.trim()).filter(Boolean).length === 0);
 }
 
 function mergeConstraintSets(

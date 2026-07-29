@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createStudioServer } from "../api/server.js";
+import { ensureChapterSpec, StorySpecStore } from "@inoks-story-webnovel/core";
 
 describe("Story workbench API", () => {
   let root: string;
@@ -87,6 +88,7 @@ describe("Story workbench API", () => {
         automationMode: "auto-draft",
         proseQuality: { enforcement: "balanced" },
         longFormMemory: { sequenceSize: 10 },
+        storySpec: { approvalMode: "automatic" },
       }),
     });
 
@@ -96,6 +98,7 @@ describe("Story workbench API", () => {
       publicationAutomationEnabled: false,
       proseQuality: { enforcement: "balanced" },
       longFormMemory: { sequenceSize: 10 },
+      storySpec: { approvalMode: "automatic", blockOnPlaceholders: true },
     });
 
     const loaded = await app.request("/api/v1/project/prose-quality");
@@ -105,6 +108,103 @@ describe("Story workbench API", () => {
       publicationAutomationEnabled: false,
       proseQuality: { enforcement: "balanced" },
       longFormMemory: { sequenceSize: 10 },
+      storySpec: { approvalMode: "automatic", requireReaderContract: true },
+    });
+  });
+
+  it("shows concrete-planning blockers and approves only the exact reviewed Story Spec version", async () => {
+    const bookDir = join(root, "books", "demo");
+    const generated = await ensureChapterSpec({
+      bookId: "demo",
+      bookDir,
+      chapterNumber: 1,
+      intent: {
+        chapter: 1,
+        goal: "林舟取得城门通行令",
+        mustKeep: [],
+        mustAvoid: [],
+        styleEmphasis: [],
+      },
+    });
+    const app = createStudioServer({} as never, root);
+    const blockedBody = await (await app.request("/api/v1/books/demo/story-workbench")).json() as {
+      specs: Array<{ planningValidation: { verdict: string; missingFields: string[] } }>;
+    };
+    expect(blockedBody.specs[0]?.planningValidation.verdict).toBe("block");
+    expect(blockedBody.specs[0]?.planningValidation.missingFields).toContain("location");
+
+    const rejected = await app.request("/api/v1/books/demo/story-workbench/spec/1/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: generated.version }),
+    });
+    expect(rejected.status).toBe(409);
+    expect(await rejected.json()).toMatchObject({
+      error: { code: "STORY_SPEC_APPROVAL_REJECTED" },
+    });
+
+    const scene = generated.sceneContracts[0]!;
+    const concrete = await new StorySpecStore(bookDir).saveChapter({
+      ...generated,
+      version: generated.version + 1,
+      pov: "林舟",
+      location: "北城门验令台",
+      time: "宵禁前一刻",
+      requiredStateChanges: ["林舟持有守门官登记过的通行令"],
+      sceneContracts: [{
+        ...scene,
+        pov: "林舟",
+        oppositionGoal: "守门官赵横要扣下有伪造嫌疑的通行令并拘住林舟",
+        characterAgendas: {
+          林舟: {
+            wants: "在宵禁前让赵横登记并放行",
+            fears: "令牌夹层的血迹引来搜查",
+            hides: ["通行令来自死去的驿卒"],
+            cannotSay: ["驿卒临死前说出的内应姓名"],
+            tactic: "先用公文编号迫使赵横按规程验令，再观察他避开哪一栏",
+            leverage: ["城防司当日验令簿"],
+            exitCondition: "赵横完成登记，或当众撕毁令牌承担越权责任",
+          },
+          赵横: {
+            wants: "找到合法理由扣下林舟和令牌",
+            fears: "验令簿上的旧签名暴露自己与驿卒相识",
+            hides: ["他认得令牌背面的缺口"],
+            cannotSay: ["内应要求他拦截持令者"],
+            tactic: "反复追问令牌来源并拖到宵禁落闸",
+            leverage: ["城门守军", "宵禁时限"],
+            exitCondition: "林舟说漏令牌来源，或围观者迫使他按规程放行",
+          },
+        },
+        conflictMethod: "林舟援引验令规程，赵横用来源追问和宵禁时限拖延，双方争夺验令簿",
+        turningPoint: "林舟发现赵横刻意跳过验令簿上驿卒签名所在的一栏",
+        decisionPoint: "林舟当众要求赵横读出该栏编号，逼他在放行与暴露之间选择",
+        irreversibleChange: "赵横盖章放行，但暗中命守军记下林舟去向",
+        entryState: {
+          goals: ["林舟必须在宵禁前进城"],
+          relationships: ["林舟与赵横互不信任"],
+          risks: ["令牌来源暴露"],
+          resources: ["未登记的通行令"],
+          information: ["林舟不知道赵横与驿卒的关系"],
+        },
+        exitState: {
+          goals: ["林舟进城后追查验令簿签名"],
+          relationships: ["赵横把林舟列为追踪目标"],
+          risks: ["守军开始尾随林舟"],
+          resources: ["已登记的通行令"],
+          information: ["林舟确认赵横认识死去的驿卒"],
+        },
+      }],
+    });
+    const approved = await app.request("/api/v1/books/demo/story-workbench/spec/1/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: concrete.version }),
+    });
+    expect(approved.status).toBe(200);
+    expect(await approved.json()).toMatchObject({
+      status: "approved",
+      approvedBy: "human",
+      version: concrete.version + 1,
     });
   });
 
