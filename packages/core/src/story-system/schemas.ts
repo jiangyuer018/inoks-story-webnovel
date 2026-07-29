@@ -89,6 +89,41 @@ export const ChapterSummaryPayloadSchema = z.object({
 
 export const ProjectionStatusSchema = z.enum(["pending", "running", "done", "skipped", "failed"]);
 
+export const ChapterLifecycleStatusSchema = z.enum([
+  "planning",
+  "planned",
+  "drafting",
+  "drafted",
+  "reviewing",
+  "repairing",
+  "awaiting-human-approval",
+  "human-editing",
+  "approved",
+  "commit-pending",
+  "committed",
+  "projection-failed",
+  "rejected",
+  "export-ready",
+  "exported",
+  "published",
+]);
+
+export const CommitValidationSchema = z.object({
+  proseQualityPassed: z.boolean(),
+  continuityPassed: z.boolean(),
+  fulfillmentPassed: z.boolean(),
+  disambiguationPassed: z.boolean(),
+  storyConvergencePassed: z.boolean(),
+  humanFeelPassed: z.boolean(),
+  emotionPassed: z.boolean(),
+  payoffPassed: z.boolean(),
+  structurePassed: z.boolean(),
+  similarityPassed: z.boolean(),
+  temporalPassed: z.boolean(),
+  humanApprovalPassed: z.boolean(),
+  blockingCount: z.number().int().min(0),
+});
+
 export const ChapterCommitSchema = z.object({
   schemaVersion: z.string().min(1),
   commitId: z.string().min(16),
@@ -104,21 +139,7 @@ export const ChapterCommitSchema = z.object({
     title: z.string().min(1),
     wordCount: z.number().int().min(0),
   }),
-  validation: z.object({
-    proseQualityPassed: z.boolean(),
-    continuityPassed: z.boolean(),
-    fulfillmentPassed: z.boolean(),
-    disambiguationPassed: z.boolean(),
-    blockingCount: z.number().int().min(0),
-    storyConvergencePassed: z.boolean().optional(),
-    humanFeelPassed: z.boolean().optional(),
-    emotionPassed: z.boolean().optional(),
-    payoffPassed: z.boolean().optional(),
-    structurePassed: z.boolean().optional(),
-    similarityPassed: z.boolean().optional(),
-    temporalPassed: z.boolean().optional(),
-    humanApprovalPassed: z.boolean().optional(),
-  }),
+  validation: CommitValidationSchema,
   events: z.array(StoryEventSchema),
   stateDeltas: z.array(StateDeltaSchema),
   entityDeltas: z.array(EntityDeltaSchema),
@@ -133,14 +154,14 @@ export const ChapterCommitSchema = z.object({
     && commit.validation.continuityPassed
     && commit.validation.fulfillmentPassed
     && commit.validation.disambiguationPassed
-    && commit.validation.storyConvergencePassed !== false
-    && commit.validation.humanFeelPassed !== false
-    && commit.validation.emotionPassed !== false
-    && commit.validation.payoffPassed !== false
-    && commit.validation.structurePassed !== false
-    && commit.validation.similarityPassed !== false
-    && commit.validation.temporalPassed !== false
-    && commit.validation.humanApprovalPassed !== false;
+    && commit.validation.storyConvergencePassed === true
+    && commit.validation.humanFeelPassed === true
+    && commit.validation.emotionPassed === true
+    && commit.validation.payoffPassed === true
+    && commit.validation.structurePassed === true
+    && commit.validation.similarityPassed === true
+    && commit.validation.temporalPassed === true
+    && commit.validation.humanApprovalPassed === true;
   if (accepted !== valid) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "commit status does not match validation result" });
   }

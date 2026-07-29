@@ -72,6 +72,16 @@ function acceptedCommit(
     continuityPassed: true,
     fulfillmentPassed: true,
     blockingCount: 0,
+    extendedValidation: {
+      storyConvergencePassed: true,
+      humanFeelPassed: true,
+      emotionPassed: true,
+      payoffPassed: true,
+      structurePassed: true,
+      similarityPassed: true,
+      temporalPassed: true,
+      humanApprovalPassed: true,
+    },
     candidates: { acceptedCandidates: events, ambiguousCandidates: [], rejectedCandidates: [] },
     stateDeltas: events.map((event) => ({
       subject: event.subject,

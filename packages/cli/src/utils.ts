@@ -152,6 +152,10 @@ export function buildPipelineConfig(
     proseQuality: config.writing.proseQuality,
     longFormMemory: config.writing.longFormMemory,
     chapterReviewMode: extra?.chapterReviewMode,
+    chapterApprovalMode: config.writing.automationMode === "manual"
+      || config.writing.automationMode === "review-first"
+      ? "human"
+      : "automatic",
     revisionGate: extra?.revisionGate,
     modelOverrides: config.modelOverrides,
     inputGovernanceMode: extra?.inputGovernanceMode ?? config.inputGovernanceMode,

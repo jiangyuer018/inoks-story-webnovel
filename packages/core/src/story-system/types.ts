@@ -34,6 +34,40 @@ export type KnownStoryEventType = typeof STORY_EVENT_TYPES[number];
 export type EpistemicStatus = "objective" | "character-belief" | "rumor" | "lie" | "hypothesis" | "dream" | "plan";
 export type ProjectionStatus = "pending" | "running" | "done" | "skipped" | "failed";
 
+export type ChapterLifecycleStatus =
+  | "planning"
+  | "planned"
+  | "drafting"
+  | "drafted"
+  | "reviewing"
+  | "repairing"
+  | "awaiting-human-approval"
+  | "human-editing"
+  | "approved"
+  | "commit-pending"
+  | "committed"
+  | "projection-failed"
+  | "rejected"
+  | "export-ready"
+  | "exported"
+  | "published";
+
+export interface CommitValidation {
+  readonly proseQualityPassed: boolean;
+  readonly continuityPassed: boolean;
+  readonly fulfillmentPassed: boolean;
+  readonly disambiguationPassed: boolean;
+  readonly storyConvergencePassed: boolean;
+  readonly humanFeelPassed: boolean;
+  readonly emotionPassed: boolean;
+  readonly payoffPassed: boolean;
+  readonly structurePassed: boolean;
+  readonly similarityPassed: boolean;
+  readonly temporalPassed: boolean;
+  readonly humanApprovalPassed: boolean;
+  readonly blockingCount: number;
+}
+
 export interface StoryEvent {
   readonly eventId: string;
   readonly chapter: number;
@@ -102,21 +136,7 @@ export interface ChapterCommit {
     readonly title: string;
     readonly wordCount: number;
   };
-  readonly validation: {
-    readonly proseQualityPassed: boolean;
-    readonly continuityPassed: boolean;
-    readonly fulfillmentPassed: boolean;
-    readonly disambiguationPassed: boolean;
-    readonly blockingCount: number;
-    readonly storyConvergencePassed?: boolean;
-    readonly humanFeelPassed?: boolean;
-    readonly emotionPassed?: boolean;
-    readonly payoffPassed?: boolean;
-    readonly structurePassed?: boolean;
-    readonly similarityPassed?: boolean;
-    readonly temporalPassed?: boolean;
-    readonly humanApprovalPassed?: boolean;
-  };
+  readonly validation: CommitValidation;
   readonly events: ReadonlyArray<StoryEvent>;
   readonly stateDeltas: ReadonlyArray<StateDelta>;
   readonly entityDeltas: ReadonlyArray<EntityDelta>;

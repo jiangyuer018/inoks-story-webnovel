@@ -9,7 +9,12 @@ export interface ChapterPersistenceUsage {
   readonly totalTokens: number;
 }
 
-export type ChapterPersistenceStatus = "ready-for-review" | "audit-failed" | "state-degraded";
+export type ChapterPersistenceStatus =
+  | "ready-for-review"
+  | "audit-failed"
+  | "state-degraded"
+  | "committed"
+  | "projection-failed";
 
 export async function persistChapterArtifacts(params: {
   readonly chapterNumber: number;
@@ -22,6 +27,7 @@ export async function persistChapterArtifacts(params: {
   readonly degradedIssues: ReadonlyArray<AuditIssue>;
   readonly tokenUsage?: ChapterPersistenceUsage;
   readonly proseQuality?: ChapterMeta["proseQuality"];
+  readonly approval?: ChapterMeta["approval"];
   readonly loadChapterIndex: () => Promise<ReadonlyArray<ChapterMeta>>;
   readonly saveChapter: () => Promise<void>;
   readonly saveTruthFiles: () => Promise<void>;
@@ -58,6 +64,7 @@ export async function persistChapterArtifacts(params: {
     lengthTelemetry: params.lengthTelemetry,
     tokenUsage: params.tokenUsage,
     proseQuality: params.proseQuality,
+    approval: params.approval,
   };
   const existingIdx = existingIndex.findIndex((e) => e.number === params.chapterNumber);
   const updatedIndex = existingIdx >= 0

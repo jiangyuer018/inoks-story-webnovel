@@ -12,6 +12,7 @@ import type {
   ChapterCommitProjectionPayload,
   ChapterFactCandidates,
   ChapterSummaryPayload,
+  CommitValidation,
   EntityDelta,
   RelationshipDelta,
   StateDelta,
@@ -124,26 +125,33 @@ export function buildChapterCommit(params: {
     return sourceEvent ? { ...delta, sourceEventId: sourceEvent.eventId } : delta;
   });
   const disambiguationPassed = params.candidates.ambiguousCandidates.length === 0;
-  const validation = {
+  const validation: CommitValidation = {
     proseQualityPassed: params.proseQualityPassed,
     continuityPassed: params.continuityPassed,
     fulfillmentPassed: params.fulfillmentPassed,
     disambiguationPassed,
     blockingCount: params.blockingCount,
-    ...params.extendedValidation,
+    storyConvergencePassed: params.extendedValidation?.storyConvergencePassed === true,
+    humanFeelPassed: params.extendedValidation?.humanFeelPassed === true,
+    emotionPassed: params.extendedValidation?.emotionPassed === true,
+    payoffPassed: params.extendedValidation?.payoffPassed === true,
+    structurePassed: params.extendedValidation?.structurePassed === true,
+    similarityPassed: params.extendedValidation?.similarityPassed === true,
+    temporalPassed: params.extendedValidation?.temporalPassed === true,
+    humanApprovalPassed: params.extendedValidation?.humanApprovalPassed === true,
   };
   const status = validation.proseQualityPassed
     && validation.continuityPassed
     && validation.fulfillmentPassed
     && validation.disambiguationPassed
-    && validation.storyConvergencePassed !== false
-    && validation.humanFeelPassed !== false
-    && validation.emotionPassed !== false
-    && validation.payoffPassed !== false
-    && validation.structurePassed !== false
-    && validation.similarityPassed !== false
-    && validation.temporalPassed !== false
-    && validation.humanApprovalPassed !== false
+    && validation.storyConvergencePassed === true
+    && validation.humanFeelPassed === true
+    && validation.emotionPassed === true
+    && validation.payoffPassed === true
+    && validation.structurePassed === true
+    && validation.similarityPassed === true
+    && validation.temporalPassed === true
+    && validation.humanApprovalPassed === true
     ? "accepted" as const
     : "rejected" as const;
   const withoutHash = {
@@ -187,6 +195,53 @@ export function buildChapterCommit(params: {
   };
   const commitHash = hashCommitPayload(withoutHash);
   return ChapterCommitSchema.parse({ ...withoutHash, commitHash }) as ChapterCommit;
+}
+
+export function validationPassedExceptHumanApproval(validation: CommitValidation): boolean {
+  return validation.proseQualityPassed === true
+    && validation.continuityPassed === true
+    && validation.fulfillmentPassed === true
+    && validation.disambiguationPassed === true
+    && validation.storyConvergencePassed === true
+    && validation.humanFeelPassed === true
+    && validation.emotionPassed === true
+    && validation.payoffPassed === true
+    && validation.structurePassed === true
+    && validation.similarityPassed === true
+    && validation.temporalPassed === true
+    && validation.blockingCount === 0;
+}
+
+export function approveChapterCommit(params: {
+  readonly commit: ChapterCommit;
+  readonly approvedContentHash: string;
+  readonly approvedAt?: string;
+}): ChapterCommit {
+  if (params.commit.source.contentHash !== params.approvedContentHash) {
+    throw new Error("Human approval hash does not match the reviewed chapter content");
+  }
+  if (!validationPassedExceptHumanApproval(params.commit.validation)) {
+    throw new Error("Chapter cannot be approved while a required quality gate is unresolved");
+  }
+  const withoutHash = {
+    ...stripCommitHash(params.commit),
+    status: "accepted" as const,
+    validation: {
+      ...params.commit.validation,
+      humanApprovalPassed: true,
+    },
+    provenance: {
+      ...params.commit.provenance,
+      humanApproval: {
+        contentHash: params.approvedContentHash,
+        approvedAt: params.approvedAt ?? new Date().toISOString(),
+      },
+    },
+  };
+  return ChapterCommitSchema.parse({
+    ...withoutHash,
+    commitHash: hashCommitPayload(withoutHash),
+  }) as ChapterCommit;
 }
 
 export function validateChapterCommit(params: {

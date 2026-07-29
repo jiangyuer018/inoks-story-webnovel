@@ -71,7 +71,9 @@ import {
 } from "../prose-quality/index.js";
 import {
   DEFAULT_LONG_FORM_MEMORY_CONFIG,
+  ChapterApprovalStore,
   ChapterCommitStore,
+  approveChapterCommit,
   buildChapterCommit,
   commitChapterTransaction,
   createDefaultProjectionManager,
@@ -79,6 +81,7 @@ import {
   markTransactionPhase,
   retrieveLongFormMemory,
   runStorySystemPreflight,
+  validationPassedExceptHumanApproval,
   type LongFormMemoryConfig,
   type MemoryContextPackage,
 } from "../story-system/index.js";
@@ -320,6 +323,12 @@ export interface PipelineConfig {
    */
   readonly chapterReviewMode?: "auto" | "manual";
   /**
+   * "automatic" keeps the existing unattended commit behaviour.
+   * "human" persists a reviewed draft outside chapters/ and pauses before
+   * the canonical ChapterCommit transaction.
+   */
+  readonly chapterApprovalMode?: "automatic" | "human";
+  /**
    * Gate for applying manual revisions (default "strict"):
    * - "strict": apply only when blocking/critical/AI-tell counts do not worsen
    *   AND at least one of blocking or AI-tell improves.
@@ -351,7 +360,13 @@ export interface ChapterPipelineResult {
   readonly wordCount: number;
   readonly auditResult: AuditResult;
   readonly revised: boolean;
-  readonly status: "ready-for-review" | "audit-failed" | "state-degraded";
+  readonly status:
+    | "awaiting-human-approval"
+    | "committed"
+    | "projection-failed"
+    | "ready-for-review"
+    | "audit-failed"
+    | "state-degraded";
   readonly lengthWarnings?: ReadonlyArray<string>;
   readonly lengthTelemetry?: LengthTelemetry;
   readonly tokenUsage?: TokenUsageSummary;
@@ -1591,6 +1606,19 @@ export class PipelineRunner {
         fulfillmentPassed: !effectivePostRevision.auditResult.issues.some((issue) =>
           issue.severity === "critical" && /hook|memo|intent|fulfill|伏笔|意图|节点/i.test(issue.category)),
         blockingCount: revisionQuality.scan.blockingCount,
+        extendedValidation: {
+          storyConvergencePassed: originalCommit.validation.storyConvergencePassed,
+          humanFeelPassed: auditHumanFeel(revisionQuality.content, { language: reviseLang }).verdict === "pass",
+          emotionPassed: originalCommit.validation.emotionPassed,
+          payoffPassed: originalCommit.validation.payoffPassed,
+          structurePassed: originalCommit.validation.structurePassed,
+          similarityPassed: originalCommit.validation.similarityPassed,
+          temporalPassed: !effectivePostRevision.auditResult.parseFailed
+            && !effectivePostRevision.auditResult.issues.some((issue) =>
+              issue.severity === "critical"
+              && /time|timeline|temporal|chronology|时间|时序|年代/i.test(`${issue.category} ${issue.description}`)),
+          humanApprovalPassed: true,
+        },
         candidates: {
           acceptedCandidates: [],
           ambiguousCandidates: [],
@@ -1798,6 +1826,16 @@ export class PipelineRunner {
         continuityPassed,
         fulfillmentPassed: true,
         blockingCount: quality.scan.blockingCount,
+        extendedValidation: {
+          storyConvergencePassed: originalCommit.validation.storyConvergencePassed,
+          humanFeelPassed: auditHumanFeel(quality.content, { language }).verdict === "pass",
+          emotionPassed: originalCommit.validation.emotionPassed,
+          payoffPassed: originalCommit.validation.payoffPassed,
+          structurePassed: originalCommit.validation.structurePassed,
+          similarityPassed: originalCommit.validation.similarityPassed,
+          temporalPassed: true,
+          humanApprovalPassed: true,
+        },
         candidates: {
           acceptedCandidates: [],
           ambiguousCandidates: [],
@@ -1947,6 +1985,208 @@ export class PipelineRunner {
     }
   }
 
+  async approveChapter(bookId: string, chapterNumber: number): Promise<ChapterPipelineResult> {
+    const releaseLock = await this.state.acquireBookLock(bookId);
+    try {
+      const book = await this.state.loadBookConfig(bookId);
+      const bookDir = this.state.bookDir(bookId);
+      const approvalStore = new ChapterApprovalStore(bookDir);
+      const pending = await approvalStore.load(chapterNumber);
+      if (!pending) {
+        throw new Error(
+          `Pending chapter ${chapterNumber} was not found at ${approvalStore.recordPath(chapterNumber)}`,
+        );
+      }
+      if (pending.record.lifecycleStatus !== "awaiting-human-approval") {
+        throw new Error(
+          `Chapter ${chapterNumber} is ${pending.record.lifecycleStatus}; it must be reviewed again before approval`,
+        );
+      }
+      const approved = await approvalStore.markApproved(
+        chapterNumber,
+        pending.record.contentHash,
+      );
+      await approvalStore.markLifecycle(chapterNumber, "commit-pending");
+      const commit = approveChapterCommit({
+        commit: approved.record.commitDraft,
+        approvedContentHash: approved.record.contentHash,
+        approvedAt: approved.record.approvedAt,
+      });
+      const language = await this.resolveBookLanguage(book);
+      const heading = language === "en"
+        ? `# Chapter ${chapterNumber}: ${approved.record.title}`
+        : `# 第${chapterNumber}章 ${approved.record.title}`;
+      const chapterDocument = `${heading}\n\n${approved.content}`;
+      const longFormMemoryConfig = this.resolveLongFormMemoryConfig(book);
+      let transaction: Awaited<ReturnType<typeof commitChapterTransaction>> | undefined;
+      try {
+        await persistChapterArtifacts({
+          chapterNumber,
+          chapterTitle: approved.record.title,
+          status: "committed",
+          auditResult: approved.record.auditResult,
+          finalWordCount: approved.record.finalWordCount,
+          lengthWarnings: approved.record.lengthWarnings,
+          lengthTelemetry: approved.record.lengthTelemetry,
+          degradedIssues: approved.record.degradedIssues,
+          tokenUsage: approved.record.tokenUsage,
+          proseQuality: approved.record.proseQuality,
+          approval: {
+            contentHash: approved.record.contentHash,
+            approvedContentHash: approved.record.contentHash,
+            approvedAt: approved.record.approvedAt,
+          },
+          loadChapterIndex: () => this.state.loadChapterIndex(bookId),
+          saveChapter: async () => {
+            transaction = await commitChapterTransaction({
+              bookDir,
+              commit,
+              chapterDocument,
+            });
+          },
+          saveTruthFiles: async () => {
+            await markTransactionPhase(transaction?.manifestPath ?? "", "projecting");
+            const projectionResults = await createDefaultProjectionManager(bookDir, {
+              sequenceSize: longFormMemoryConfig.sequenceSize,
+              generateSequenceSummaries: longFormMemoryConfig.generateSequenceSummaries,
+              generateArcSummaries: longFormMemoryConfig.generateArcSummaries,
+            }).project(commit);
+            const failures = projectionResults.filter((result) => result.status === "failed");
+            if (failures.length > 0 && longFormMemoryConfig.blockOnProjectionFailure) {
+              throw new Error(
+                `Chapter committed but required projection failed: ${failures
+                  .map((item) => `${item.name}: ${item.error ?? "failed"}`)
+                  .join("; ")}`,
+              );
+            }
+            await markTransactionPhase(transaction?.manifestPath ?? "", "complete");
+          },
+          saveChapterIndex: (index) => this.state.saveChapterIndex(bookId, index),
+          markBookActiveIfNeeded: () => this.markBookActiveIfNeeded(bookId),
+          persistAuditDriftGuidance: (issues) => this.persistAuditDriftGuidance({
+            bookDir,
+            chapterNumber,
+            issues,
+            language,
+          }).catch(() => undefined),
+          snapshotState: () => this.state.snapshotState(bookId, chapterNumber),
+          syncCurrentStateFactHistory: async () => undefined,
+          logSnapshotStage: () =>
+            this.logStage(language, { zh: "更新章节索引与快照", en: "updating chapter index and snapshots" }),
+        });
+      } catch (error) {
+        if (transaction) {
+          await approvalStore.markLifecycle(chapterNumber, "projection-failed");
+          const index = await this.state.loadChapterIndex(bookId);
+          const existing = index.find((chapter) => chapter.number === chapterNumber);
+          const now = new Date().toISOString();
+          const failedMeta: ChapterMeta = {
+            number: chapterNumber,
+            title: approved.record.title,
+            status: "projection-failed",
+            wordCount: approved.record.finalWordCount,
+            createdAt: existing?.createdAt ?? approved.record.createdAt,
+            updatedAt: now,
+            auditIssues: approved.record.auditResult.issues
+              .map((issue) => `[${issue.severity}] ${issue.description}`),
+            lengthWarnings: [...approved.record.lengthWarnings],
+            lengthTelemetry: approved.record.lengthTelemetry,
+            tokenUsage: approved.record.tokenUsage,
+            proseQuality: approved.record.proseQuality,
+            approval: {
+              contentHash: approved.record.contentHash,
+              approvedContentHash: approved.record.contentHash,
+              approvedAt: approved.record.approvedAt,
+            },
+          };
+          await this.state.saveChapterIndex(
+            bookId,
+            existing
+              ? index.map((chapter) => chapter.number === chapterNumber ? failedMeta : chapter)
+              : [...index, failedMeta],
+          );
+        } else {
+          await approvalStore.markLifecycle(chapterNumber, "approved");
+        }
+        throw error;
+      }
+      await approvalStore.markLifecycle(chapterNumber, "committed");
+      return {
+        chapterNumber,
+        title: approved.record.title,
+        wordCount: approved.record.finalWordCount,
+        auditResult: approved.record.auditResult,
+        revised: approved.record.proseQuality?.repaired ?? false,
+        status: "committed",
+        lengthWarnings: approved.record.lengthWarnings,
+        lengthTelemetry: approved.record.lengthTelemetry,
+        tokenUsage: approved.record.tokenUsage,
+      };
+    } finally {
+      await releaseLock();
+    }
+  }
+
+  async updatePendingChapterContent(
+    bookId: string,
+    chapterNumber: number,
+    content: string,
+  ): Promise<{ readonly status: "human-editing"; readonly contentHash: string }> {
+    const releaseLock = await this.state.acquireBookLock(bookId);
+    try {
+      if (!content.trim()) throw new Error("Pending chapter content cannot be empty");
+      const store = new ChapterApprovalStore(this.state.bookDir(bookId));
+      const updated = await store.invalidateWithEditedContent(chapterNumber, content);
+      const index = await this.state.loadChapterIndex(bookId);
+      await this.state.saveChapterIndex(bookId, index.map((chapter) =>
+        chapter.number === chapterNumber
+          ? {
+              ...chapter,
+              status: "human-editing" as const,
+              wordCount: content.replace(/\s+/g, "").length,
+              updatedAt: updated.record.updatedAt,
+              approval: { contentHash: updated.record.contentHash },
+            }
+          : chapter));
+      return {
+        status: "human-editing",
+        contentHash: updated.record.contentHash,
+      };
+    } finally {
+      await releaseLock();
+    }
+  }
+
+  async rejectPendingChapter(
+    bookId: string,
+    chapterNumber: number,
+    reason = "Rejected by author",
+  ): Promise<{ readonly status: "rejected"; readonly chapterNumber: number }> {
+    const releaseLock = await this.state.acquireBookLock(bookId);
+    try {
+      const store = new ChapterApprovalStore(this.state.bookDir(bookId));
+      const pending = await store.load(chapterNumber);
+      if (!pending) throw new Error(`Pending chapter ${chapterNumber} was not found`);
+      if (pending.record.lifecycleStatus === "committed") {
+        throw new Error(`Chapter ${chapterNumber} is already committed; use a ChapterAmendment`);
+      }
+      await store.markLifecycle(chapterNumber, "rejected");
+      const index = await this.state.loadChapterIndex(bookId);
+      await this.state.saveChapterIndex(bookId, index.map((chapter) =>
+        chapter.number === chapterNumber
+          ? {
+              ...chapter,
+              status: "rejected" as const,
+              reviewNote: reason,
+              updatedAt: new Date().toISOString(),
+            }
+          : chapter));
+      return { status: "rejected", chapterNumber };
+    } finally {
+      await releaseLock();
+    }
+  }
+
   async repairChapterState(bookId: string, chapterNumber?: number): Promise<ChapterPipelineResult> {
     const releaseLock = await this.state.acquireBookLock(bookId);
     try {
@@ -1976,6 +2216,11 @@ export class PipelineRunner {
     const book = await this.state.loadBookConfig(bookId);
     const bookDir = this.state.bookDir(bookId);
     await this.assertNoPendingStateRepair(bookId);
+    if (await new ChapterApprovalStore(bookDir).hasPending()) {
+      throw new Error(
+        `Book "${bookId}" has a reviewed chapter awaiting human action. Approve, edit and re-review, or reject it before writing another chapter.`,
+      );
+    }
     const longFormMemoryConfig = this.resolveLongFormMemoryConfig(book);
     if (longFormMemoryConfig.enabled) {
       const preflight = await runStorySystemPreflight({
@@ -2195,7 +2440,7 @@ export class PipelineRunner {
       chapterNumber,
       report: humanFeelReport,
     });
-    let storyConvergencePassed = humanFeelReport.verdict !== "block";
+    let storyConvergencePassed = humanFeelReport.verdict === "pass";
     let emotionPassed = true;
     let missingLogicPassed = true;
     let payoffPassed = true;
@@ -2284,7 +2529,7 @@ export class PipelineRunner {
           },
           {
             gate: "human-feel",
-            passed: humanFeelReport.verdict !== "block",
+            passed: humanFeelReport.verdict === "pass",
             blocking: true,
             details: humanFeelReport.blockingIssues.map((issue) => issue.message),
           },
@@ -2529,6 +2774,11 @@ export class PipelineRunner {
     });
     const commitStore = new ChapterCommitStore(bookDir);
     const parentCommit = await commitStore.loadHead();
+    const humanApprovalRequired = (this.config.chapterApprovalMode ?? "automatic") === "human";
+    const temporalPassed = !auditResult.parseFailed
+      && !auditResult.issues.some((issue) =>
+        issue.severity === "critical"
+        && /time|timeline|temporal|chronology|时间|时序|年代/i.test(`${issue.category} ${issue.description}`));
     const commit = buildChapterCommit({
       bookId,
       bookDir,
@@ -2548,11 +2798,13 @@ export class PipelineRunner {
       blockingCount: proseQualityResult.scan.blockingCount,
       extendedValidation: {
         storyConvergencePassed,
-        humanFeelPassed: humanFeelReport.verdict !== "block",
+        humanFeelPassed: humanFeelReport.verdict === "pass",
         emotionPassed,
         structurePassed: missingLogicPassed,
         payoffPassed,
         similarityPassed,
+        temporalPassed,
+        humanApprovalPassed: !humanApprovalRequired,
       },
       candidates: extraction,
       stateDeltas: extraction.stateDeltas,
@@ -2595,9 +2847,84 @@ export class PipelineRunner {
           : undefined,
         auditSummary: auditResult.summary,
         reviewMode: this.config.chapterReviewMode ?? "auto",
+        approvalMode: this.config.chapterApprovalMode ?? "automatic",
       },
     });
+    const proseQualityMeta: NonNullable<ChapterMeta["proseQuality"]> = {
+      score: proseQualityResult.scan.score,
+      level: proseQualityResult.scan.level,
+      blockingCount: proseQualityResult.scan.blockingCount,
+      advisoryCount: proseQualityResult.scan.advisoryCount,
+      repaired: proseQualityResult.repaired,
+      iterations: proseQualityResult.iterations,
+      reportPath: relativeToBookDir(bookDir, proseQualityResult.reportPath),
+    };
     if (commit.status !== "accepted") {
+      if (humanApprovalRequired && validationPassedExceptHumanApproval(commit.validation)) {
+        const pending = await new ChapterApprovalStore(bookDir).save({
+          content: finalContent,
+          record: {
+            bookId,
+            chapter: chapterNumber,
+            title: persistenceOutput.title,
+            lifecycleStatus: "awaiting-human-approval",
+            reviewedContentHash: commit.source.contentHash,
+            commitDraft: commit,
+            auditResult,
+            finalWordCount,
+            lengthWarnings,
+            lengthTelemetry,
+            degradedIssues,
+            tokenUsage: totalUsage,
+            proseQuality: proseQualityMeta,
+          },
+        });
+        const now = new Date().toISOString();
+        const existingIndex = await this.state.loadChapterIndex(bookId);
+        const existing = existingIndex.find((chapter) => chapter.number === chapterNumber);
+        const pendingMeta: ChapterMeta = {
+          number: chapterNumber,
+          title: persistenceOutput.title,
+          status: "awaiting-human-approval",
+          wordCount: finalWordCount,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+          auditIssues: auditResult.issues.map((issue) => `[${issue.severity}] ${issue.description}`),
+          lengthWarnings: [...lengthWarnings],
+          lengthTelemetry,
+          tokenUsage: totalUsage,
+          proseQuality: proseQualityMeta,
+          approval: {
+            contentHash: pending.record.contentHash,
+          },
+        };
+        await this.state.saveChapterIndex(
+          bookId,
+          existing
+            ? existingIndex.map((chapter) => chapter.number === chapterNumber ? pendingMeta : chapter)
+            : [...existingIndex, pendingMeta],
+        );
+        await this.markBookActiveIfNeeded(bookId);
+        await this.emitWebhook("pipeline-complete", bookId, chapterNumber, {
+          title: persistenceOutput.title,
+          wordCount: finalWordCount,
+          passed: true,
+          revised,
+          status: "awaiting-human-approval",
+          draftPath: pending.draftPath,
+        });
+        return {
+          chapterNumber,
+          title: persistenceOutput.title,
+          wordCount: finalWordCount,
+          auditResult,
+          revised,
+          status: "awaiting-human-approval",
+          lengthWarnings,
+          lengthTelemetry,
+          tokenUsage: totalUsage,
+        };
+      }
       const rejectedPath = await commitStore.writeRejected(commit);
       throw new Error(
         `ChapterCommit rejected; canonical state was not changed. ${rejectedPath}`,
@@ -2608,22 +2935,14 @@ export class PipelineRunner {
     await persistChapterArtifacts({
       chapterNumber,
       chapterTitle: persistenceOutput.title,
-      status: resolvedStatus,
+      status: "committed",
       auditResult,
       finalWordCount,
       lengthWarnings,
       lengthTelemetry,
       degradedIssues,
       tokenUsage: totalUsage,
-      proseQuality: {
-        score: proseQualityResult.scan.score,
-        level: proseQualityResult.scan.level,
-        blockingCount: proseQualityResult.scan.blockingCount,
-        advisoryCount: proseQualityResult.scan.advisoryCount,
-        repaired: proseQualityResult.repaired,
-        iterations: proseQualityResult.iterations,
-        reportPath: relativeToBookDir(bookDir, proseQualityResult.reportPath),
-      },
+      proseQuality: proseQualityMeta,
       loadChapterIndex: () => this.state.loadChapterIndex(bookId),
       saveChapter: async () => {
         transaction = await commitChapterTransaction({
@@ -2717,7 +3036,7 @@ export class PipelineRunner {
       wordCount: finalWordCount,
       passed: auditResult.passed,
       revised,
-      status: resolvedStatus,
+      status: "committed",
     });
 
     return {
@@ -2726,7 +3045,7 @@ export class PipelineRunner {
       wordCount: finalWordCount,
       auditResult,
       revised,
-      status: resolvedStatus,
+      status: "committed",
       lengthWarnings,
       lengthTelemetry,
       tokenUsage: totalUsage,
@@ -3598,6 +3917,22 @@ ${matrix}`,
           fulfillmentPassed: !importedAudit.auditResult.issues.some((issue) =>
             issue.severity === "critical" && /hook|memo|intent|fulfill|伏笔|意图|节点/i.test(issue.category)),
           blockingCount: quality.scan.blockingCount,
+          extendedValidation: {
+            storyConvergencePassed: true,
+            // Import is an explicit author-controlled canon operation, not an
+            // AI-generated chapter. The prose gate and continuity audit still
+            // run, while human-feel is recorded as not-applicable/pass.
+            humanFeelPassed: true,
+            emotionPassed: true,
+            payoffPassed: true,
+            structurePassed: true,
+            similarityPassed: true,
+            temporalPassed: !importedAudit.auditResult.parseFailed
+              && !importedAudit.auditResult.issues.some((issue) =>
+                issue.severity === "critical"
+                && /time|timeline|temporal|chronology|时间|时序|年代/i.test(`${issue.category} ${issue.description}`)),
+            humanApprovalPassed: true,
+          },
           candidates: extraction,
           stateDeltas: extraction.stateDeltas,
           runtimeStateDelta: runtimeProjection?.resolvedDelta ?? runtimeDelta,

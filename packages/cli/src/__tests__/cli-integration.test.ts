@@ -4,7 +4,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { StateManager } from "@inoks-story-webnovel/core";
+import {
+  ChapterApprovalStore,
+  StateManager,
+  buildChapterCommit,
+} from "@inoks-story-webnovel/core";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const cliDir = resolve(testDir, "..", "..");
@@ -824,14 +828,73 @@ describe("CLI integration", () => {
       );
       await writeFile(join(storyDir, "current_state.md"), "State at ch1", "utf-8");
       await writeFile(join(storyDir, "pending_hooks.md"), "Hooks at ch1", "utf-8");
-      await writeFile(join(chaptersDir, "0001_ch1.md"), "# Chapter 1\n\nContent 1", "utf-8");
+      const commitDraft = buildChapterCommit({
+        bookId,
+        bookDir,
+        chapter: 1,
+        title: "Ch1",
+        content: "Content 1",
+        wordCount: 2,
+        chapterPath: join(chaptersDir, "0001_ch1.md"),
+        proseQualityPassed: true,
+        continuityPassed: true,
+        fulfillmentPassed: true,
+        blockingCount: 0,
+        extendedValidation: {
+          storyConvergencePassed: true,
+          humanFeelPassed: true,
+          emotionPassed: true,
+          payoffPassed: true,
+          structurePassed: true,
+          similarityPassed: true,
+          temporalPassed: true,
+          humanApprovalPassed: false,
+        },
+        candidates: {
+          acceptedCandidates: [],
+          ambiguousCandidates: [],
+          rejectedCandidates: [],
+        },
+        summary: {
+          chapter: 1,
+          title: "Ch1",
+          characters: "",
+          events: "Content 1",
+          stateChanges: "",
+          hookActivity: "",
+          mood: "",
+          chapterType: "",
+          text: "Content 1",
+        },
+        projectionPayload: {
+          currentStateMarkdown: "State at ch1",
+          hooksMarkdown: "Hooks at ch1",
+        },
+      });
+      const approvalStore = new ChapterApprovalStore(bookDir);
+      await approvalStore.save({
+        content: "Content 1",
+        record: {
+          bookId,
+          chapter: 1,
+          title: "Ch1",
+          lifecycleStatus: "awaiting-human-approval",
+          reviewedContentHash: commitDraft.source.contentHash,
+          commitDraft,
+          auditResult: { passed: true, issues: [], summary: "pass" },
+          finalWordCount: 2,
+          lengthWarnings: [],
+          degradedIssues: [],
+        },
+      });
+      await expect(approvalStore.load(1)).resolves.not.toBeNull();
       await writeFile(
         join(chaptersDir, "index.json"),
         JSON.stringify([
           {
             number: 1,
             title: "Ch1",
-            status: "ready-for-review",
+            status: "awaiting-human-approval",
             wordCount: 100,
             createdAt: "",
             updatedAt: "",
@@ -858,7 +921,7 @@ describe("CLI integration", () => {
       ).resolves.toBe("Hooks at ch1");
 
       const index = await state.loadChapterIndex(bookId);
-      expect(index[0]?.status).toBe("approved");
+      expect(index[0]?.status).toBe("committed");
     });
   });
 

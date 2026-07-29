@@ -1,6 +1,20 @@
 import { Command } from "commander";
-import { StateManager, formatLengthCount, readGenreProfile, resolveLengthCountingMode } from "@inoks-story-webnovel/core";
-import { findProjectRoot, resolveBookId, log, logError } from "../utils.js";
+import {
+  ChapterApprovalStore,
+  PipelineRunner,
+  StateManager,
+  formatLengthCount,
+  readGenreProfile,
+  resolveLengthCountingMode,
+} from "@inoks-story-webnovel/core";
+import {
+  buildPipelineConfig,
+  findProjectRoot,
+  loadConfig,
+  resolveBookId,
+  log,
+  logError,
+} from "../utils.js";
 
 export const reviewCommand = new Command("review")
   .description("Review and approve chapters");
@@ -30,7 +44,11 @@ reviewCommand
         const index = await state.loadChapterIndex(id);
         const pending = index.filter(
           (ch) =>
-            ch.status === "ready-for-review" || ch.status === "audit-failed",
+            ch.status === "ready-for-review"
+            || ch.status === "audit-failed"
+            || ch.status === "awaiting-human-approval"
+            || ch.status === "human-editing"
+            || ch.status === "projection-failed",
         );
 
         if (pending.length === 0) continue;
@@ -115,24 +133,14 @@ reviewCommand
       const { bookIdArg, chapterNum } = parseBookAndChapter(args);
       const bookId = await resolveBookId(bookIdArg, root);
 
-      const state = new StateManager(root);
-      const index = [...(await state.loadChapterIndex(bookId))];
-      const idx = index.findIndex((ch) => ch.number === chapterNum);
-      if (idx === -1) {
-        throw new Error(`Chapter ${chapterNum} not found in "${bookId}"`);
-      }
-
-      index[idx] = {
-        ...index[idx]!,
-        status: "approved",
-        updatedAt: new Date().toISOString(),
-      };
-      await state.saveChapterIndex(bookId, index);
+      const config = await loadConfig({ projectRoot: root, requireApiKey: false });
+      const pipeline = new PipelineRunner(buildPipelineConfig(config, root));
+      const result = await pipeline.approveChapter(bookId, chapterNum);
 
       if (opts.json) {
-        log(JSON.stringify({ bookId, chapter: chapterNum, status: "approved" }));
+        log(JSON.stringify({ bookId, chapter: chapterNum, status: result.status }));
       } else {
-        log(`Chapter ${chapterNum} approved (state committed).`);
+        log(`Chapter ${chapterNum} approved and committed.`);
       }
     } catch (e) {
       if (opts.json) {
@@ -154,20 +162,15 @@ reviewCommand
       const root = findProjectRoot();
       const bookId = await resolveBookId(bookIdArg, root);
       const state = new StateManager(root);
-
-      const index = [...(await state.loadChapterIndex(bookId))];
+      const index = await state.loadChapterIndex(bookId);
+      const pending = index.filter((chapter) => chapter.status === "awaiting-human-approval");
+      const config = await loadConfig({ projectRoot: root, requireApiKey: false });
+      const pipeline = new PipelineRunner(buildPipelineConfig(config, root));
       let count = 0;
-      const now = new Date().toISOString();
-
-      const updated = index.map((ch) => {
-        if (ch.status === "ready-for-review" || ch.status === "audit-failed") {
-          count++;
-          return { ...ch, status: "approved" as const, updatedAt: now };
-        }
-        return ch;
-      });
-
-      await state.saveChapterIndex(bookId, updated);
+      for (const chapter of pending) {
+        await pipeline.approveChapter(bookId, chapter.number);
+        count += 1;
+      }
 
       if (opts.json) {
         log(JSON.stringify({ bookId, approvedCount: count }));
@@ -202,6 +205,19 @@ reviewCommand
       const idx = index.findIndex((ch) => ch.number === chapterNum);
       if (idx === -1) {
         throw new Error(`Chapter ${chapterNum} not found in "${bookId}"`);
+      }
+
+      const pending = await new ChapterApprovalStore(state.bookDir(bookId)).load(chapterNum);
+      if (pending && pending.record.lifecycleStatus !== "committed") {
+        const config = await loadConfig({ projectRoot: root, requireApiKey: false });
+        const pipeline = new PipelineRunner(buildPipelineConfig(config, root));
+        await pipeline.rejectPendingChapter(bookId, chapterNum, opts.reason);
+        if (opts.json) {
+          log(JSON.stringify({ bookId, chapter: chapterNum, status: "rejected", discarded: [] }));
+        } else {
+          log(`Chapter ${chapterNum} draft rejected; canonical state was unchanged.`);
+        }
+        return;
       }
 
       if (opts.keepSubsequent) {

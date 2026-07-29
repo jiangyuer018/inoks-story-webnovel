@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ChapterCommitStore,
+  ChapterApprovalStore,
   ProjectionManager,
+  approveChapterCommit,
   buildChapterCommit,
   commitChapterTransaction,
   deterministicCommitId,
@@ -43,6 +45,59 @@ describe("ChapterCommit", () => {
       ...event,
       payload: { to: "北站" },
     }));
+  });
+
+  it("fails closed when required extended validation is omitted", async () => {
+    const root = await makeBookDir();
+    const commit = buildCommit(root, { extendedValidation: {} });
+    expect(commit.status).toBe("rejected");
+    expect(commit.validation.storyConvergencePassed).toBe(false);
+    expect(commit.validation.humanFeelPassed).toBe(false);
+    expect(commit.validation.temporalPassed).toBe(false);
+    expect(commit.validation.humanApprovalPassed).toBe(false);
+  });
+
+  it("stores a reviewed draft outside chapters and approves only the same hash", async () => {
+    const root = await makeBookDir();
+    const draft = buildCommit(root, {
+      content: "林岚把账本推到桌中央。",
+      extendedValidation: {
+        ...allExtendedGatesPassed(),
+        humanApprovalPassed: false,
+      },
+    });
+    expect(draft.status).toBe("rejected");
+    const store = new ChapterApprovalStore(root);
+    const saved = await store.save({
+      content: "林岚把账本推到桌中央。",
+      record: {
+        bookId: "book",
+        chapter: 1,
+        title: "账本",
+        lifecycleStatus: "awaiting-human-approval",
+        reviewedContentHash: draft.source.contentHash,
+        commitDraft: draft,
+        auditResult: { passed: true, issues: [], summary: "pass" },
+        finalWordCount: 12,
+        lengthWarnings: [],
+        degradedIssues: [],
+      },
+    });
+    await expect(access(join(root, "chapters", "0001_账本.md"))).rejects.toThrow();
+    expect(saved.record.contentHash).toBe(draft.source.contentHash);
+    expect(() => approveChapterCommit({
+      commit: draft,
+      approvedContentHash: sha256("已被修改"),
+    })).toThrow(/hash/i);
+
+    const marked = await store.markApproved(1, saved.record.contentHash);
+    const accepted = approveChapterCommit({
+      commit: marked.record.commitDraft,
+      approvedContentHash: marked.record.approvedContentHash!,
+      approvedAt: marked.record.approvedAt,
+    });
+    expect(accepted.status).toBe("accepted");
+    expect(accepted.validation.humanApprovalPassed).toBe(true);
   });
 
   it("rejects ambiguity and parent/content conflicts", async () => {
@@ -365,6 +420,7 @@ function buildCommit(
     projectionPayload?: Parameters<typeof buildChapterCommit>[0]["projectionPayload"];
     provenance?: Record<string, unknown>;
     stateDeltas?: ReadonlyArray<StateDelta>;
+    extendedValidation?: Parameters<typeof buildChapterCommit>[0]["extendedValidation"];
   } = {},
 ): ChapterCommit {
   const chapter = overrides.chapter ?? 1;
@@ -382,6 +438,7 @@ function buildCommit(
     continuityPassed: true,
     fulfillmentPassed: true,
     blockingCount: 0,
+    extendedValidation: overrides.extendedValidation ?? allExtendedGatesPassed(),
     candidates: overrides.candidates ?? cleanCandidates,
     summary: {
       chapter,
@@ -399,4 +456,17 @@ function buildCommit(
     stateDeltas: overrides.stateDeltas,
     createdAt: `2026-01-${String(chapter).padStart(2, "0")}T00:00:00.000Z`,
   });
+}
+
+function allExtendedGatesPassed() {
+  return {
+    storyConvergencePassed: true,
+    humanFeelPassed: true,
+    emotionPassed: true,
+    payoffPassed: true,
+    structurePassed: true,
+    similarityPassed: true,
+    temporalPassed: true,
+    humanApprovalPassed: true,
+  } as const;
 }

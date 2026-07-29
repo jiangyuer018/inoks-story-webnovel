@@ -329,6 +329,7 @@ vi.mock("@inoks-story-webnovel/core", async (importOriginal) => {
     WritingAutomationModeSchema: actual.WritingAutomationModeSchema,
     AgentLLMOverrideSchema: actual.AgentLLMOverrideSchema,
     ChapterCommitStore: actual.ChapterCommitStore,
+    ChapterApprovalStore: actual.ChapterApprovalStore,
     latestProjectionFailures: actual.latestProjectionFailures,
     replayStorySystem: actual.replayStorySystem,
     repairStorySystem: actual.repairStorySystem,

@@ -130,6 +130,16 @@ function buildCommit(
     continuityPassed: true,
     fulfillmentPassed: true,
     blockingCount: 0,
+    extendedValidation: {
+      storyConvergencePassed: true,
+      humanFeelPassed: true,
+      emotionPassed: true,
+      payoffPassed: true,
+      structurePassed: true,
+      similarityPassed: true,
+      temporalPassed: true,
+      humanApprovalPassed: true,
+    },
     candidates: { acceptedCandidates: [], ambiguousCandidates: [], rejectedCandidates: [] },
     summary: {
       chapter,

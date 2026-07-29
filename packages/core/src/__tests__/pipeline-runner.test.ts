@@ -2774,7 +2774,7 @@ describe("PipelineRunner", () => {
 
     const result = await runner.writeNextChapter(bookId);
 
-    expect(result.status).toBe("ready-for-review");
+    expect(result.status).toBe("committed");
     await expect(readFile(join(storyDir, "current_state.md"), "utf-8"))
       .resolves.toMatch(/\|\s*(Current Chapter|当前章节)\s*\|\s*1\s*\|/);
     await expect(readFile(join(storyDir, "state", "manifest.json"), "utf-8"))
@@ -2950,7 +2950,7 @@ describe("PipelineRunner", () => {
 
     const result = await runner.writeNextChapter(bookId);
 
-    expect(result.status).toBe("ready-for-review");
+    expect(result.status).toBe("committed");
     expect(writeSpy).toHaveBeenCalledTimes(1);
     expect(settleSpy).toHaveBeenCalledTimes(1);
     expect(settleSpy).toHaveBeenCalledWith(expect.objectContaining({
@@ -3337,7 +3337,7 @@ describe("PipelineRunner", () => {
     expect(result.wordCount).toBe(expectedCount);
     expect(savedChapter).toContain(revisedBody);
     expect(savedIndex[0]?.wordCount).toBe(expectedCount);
-    expect(savedIndex[0]?.status).toBe("ready-for-review");
+    expect(savedIndex[0]?.status).toBe("committed");
 
     await rm(root, { recursive: true, force: true });
   });

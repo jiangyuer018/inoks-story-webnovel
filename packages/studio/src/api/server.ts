@@ -50,6 +50,7 @@ import {
   WritingAutomationModeSchema,
   AgentLLMOverrideSchema,
   ChapterCommitStore,
+  ChapterApprovalStore,
   latestProjectionFailures,
   replayStorySystem,
   repairStorySystem,
@@ -2818,6 +2819,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       proseQuality: ProseQualityConfigSchema.parse(currentConfig.writing?.proseQuality ?? {}),
       longFormMemory: LongFormMemoryConfigSchema.parse(currentConfig.writing?.longFormMemory ?? {}),
       chapterReviewMode,
+      chapterApprovalMode: currentConfig.writing?.automationMode === "manual"
+        || currentConfig.writing?.automationMode === "review-first"
+        ? "human"
+        : "automatic",
       revisionGate,
       modelOverrides: currentConfig.modelOverrides,
       notifyChannels: currentConfig.notify,
@@ -2985,13 +2990,32 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       const files = await readdir(chaptersDir);
       const paddedNum = String(num).padStart(4, "0");
       const match = files.find((f) => f.startsWith(paddedNum) && f.endsWith(".md"));
-      if (!match) return c.json({ error: "Chapter not found" }, 404);
+      if (!match) {
+        const pending = await new ChapterApprovalStore(bookDir).load(num);
+        if (!pending) return c.json({ error: "Chapter not found" }, 404);
+        return c.json({
+          chapterNumber: num,
+          filename: "draft.md",
+          content: `# 第${num}章 ${pending.record.title}\n\n${pending.content}`,
+          status: pending.record.lifecycleStatus,
+          pending: true,
+          approval: {
+            contentHash: pending.record.contentHash,
+            reviewedContentHash: pending.record.reviewedContentHash,
+            approvedContentHash: pending.record.approvedContentHash ?? null,
+          },
+          proseQuality: pending.record.proseQuality ?? null,
+        });
+      }
       const content = await readFile(join(chaptersDir, match), "utf-8");
       const meta = (await state.loadChapterIndex(id)).find((chapter) => chapter.number === num);
       return c.json({
         chapterNumber: num,
         filename: match,
         content,
+        status: meta?.status ?? null,
+        pending: false,
+        approval: meta?.approval ?? null,
         proseQuality: meta?.proseQuality ?? null,
       });
     } catch {
@@ -3009,6 +3033,19 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     const { content } = await c.req.json<{ content: string }>();
 
     try {
+      const pending = await new ChapterApprovalStore(bookDir).load(num);
+      if (pending && pending.record.lifecycleStatus !== "committed") {
+        const chapterBody = content.replace(/^# .*\r?\n+/, "");
+        const pipeline = new PipelineRunner(await buildPipelineConfig({ bookIdForSettings: id }));
+        const result = await pipeline.updatePendingChapterContent(id, num, chapterBody);
+        return c.json({
+          ok: true,
+          chapterNumber: num,
+          pending: true,
+          ...result,
+          requiresReview: true,
+        });
+      }
       const files = await readdir(chaptersDir);
       const paddedNum = String(num).padStart(4, "0");
       const match = files.find((f) => f.startsWith(paddedNum) && f.endsWith(".md"));
@@ -3289,12 +3326,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     const num = parseInt(c.req.param("num"), 10);
 
     try {
-      const index = await state.loadChapterIndex(id);
-      const updated = index.map((ch) =>
-        ch.number === num ? { ...ch, status: "approved" as const } : ch,
-      );
-      await state.saveChapterIndex(id, updated);
-      return c.json({ ok: true, chapterNumber: num, status: "approved" });
+      const pipeline = new PipelineRunner(await buildPipelineConfig({ bookIdForSettings: id }));
+      const result = await pipeline.approveChapter(id, num);
+      broadcast("chapter:approved", { bookId: id, chapterNumber: num, status: result.status });
+      return c.json({ ok: true, chapterNumber: num, status: result.status, result });
     } catch (e) {
       return c.json({ error: String(e) }, 500);
     }
@@ -3305,6 +3340,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     const num = parseInt(c.req.param("num"), 10);
 
     try {
+      const pending = await new ChapterApprovalStore(state.bookDir(id)).load(num);
+      if (pending && pending.record.lifecycleStatus !== "committed") {
+        const pipeline = new PipelineRunner(await buildPipelineConfig({ bookIdForSettings: id }));
+        const result = await pipeline.rejectPendingChapter(id, num, "Rejected in Studio");
+        return c.json({ ok: true, ...result, discarded: [] });
+      }
       const index = await state.loadChapterIndex(id);
       const target = index.find((ch) => ch.number === num);
       if (!target) {

@@ -241,7 +241,21 @@ export class Scheduler {
 
       const result = await this.pipeline.writeNextChapter(bookId, undefined, tempOverride);
 
-      if (result.status === "ready-for-review") {
+      if (result.status === "awaiting-human-approval") {
+        const reason = `Chapter ${result.chapterNumber} is awaiting human approval`;
+        await this.automationStore(bookId).update({
+          paused: true,
+          pauseReason: reason,
+          consecutiveFailures: 0,
+          failureDimensions: {},
+          lastError: undefined,
+        });
+        this.config.onPause?.(bookId, reason);
+        this.config.onChapterComplete?.(bookId, result.chapterNumber, result.status);
+        return true;
+      }
+
+      if (result.status === "committed" || result.status === "ready-for-review") {
         await this.automationStore(bookId).update({
           consecutiveFailures: 0,
           failureDimensions: {},

@@ -11,7 +11,14 @@ export const ChapterStatusSchema = z.enum([
   "state-degraded",
   "revising",
   "ready-for-review",
+  "awaiting-human-approval",
+  "human-editing",
   "approved",
+  "commit-pending",
+  "committed",
+  "projection-failed",
+  "export-ready",
+  "exported",
   "rejected",
   "published",
   "imported",
@@ -45,6 +52,11 @@ export const ChapterMetaSchema = z.object({
     repaired: z.boolean(),
     iterations: z.number().int().min(0),
     reportPath: z.string(),
+  }).optional(),
+  approval: z.object({
+    contentHash: z.string().length(64),
+    approvedContentHash: z.string().length(64).optional(),
+    approvedAt: z.string().datetime().optional(),
   }).optional(),
 });
 
