@@ -98,6 +98,12 @@ import {
   extractNarrativeLogicNodes,
 } from "../narrative-research/index.js";
 import { auditHumanFeel, saveHumanFeelReport } from "../human-feel/index.js";
+import {
+  PayoffLedgerStore,
+  ReaderContractStore,
+  auditPayoff,
+  savePayoffAudit,
+} from "../story-craft/index.js";
 
 const SEQUENCE_LEVEL_CATEGORIES = new Set([
   "Pacing Monotony", "节奏单调",
@@ -2161,6 +2167,8 @@ export class PipelineRunner {
     let storyConvergencePassed = humanFeelReport.verdict !== "block";
     let emotionPassed = true;
     let missingLogicPassed = true;
+    let payoffPassed = true;
+    let payoffReportPath: string | undefined;
     const compiledWritingContract = writeInput.compiledWritingContract;
     if (compiledWritingContract) {
       this.logStage(stageLanguage, {
@@ -2178,6 +2186,17 @@ export class PipelineRunner {
       const missingLogicIssues = detectMissingNarrativeLogic(
         extractNarrativeLogicNodes(finalContent),
       );
+      const payoffAudit = auditPayoff({
+        content: finalContent,
+        chapter: chapterNumber,
+        targets: compiledWritingContract.payoffTargets,
+      });
+      payoffPassed = payoffAudit.passed;
+      payoffReportPath = await savePayoffAudit({
+        bookDir,
+        chapter: chapterNumber,
+        audit: payoffAudit,
+      });
       emotionPassed = emotionAudit?.verdict !== "block";
       missingLogicPassed = !missingLogicIssues.some((issue) => issue.severity === "blocking");
       const convergence = await runStoryConvergence({
@@ -2228,6 +2247,14 @@ export class PipelineRunner {
             passed: humanFeelReport.verdict !== "block",
             blocking: true,
             details: humanFeelReport.blockingIssues.map((issue) => issue.message),
+          },
+          {
+            gate: "payoff",
+            passed: payoffPassed,
+            blocking: true,
+            details: payoffAudit.issues
+              .filter((issue) => issue.severity === "blocking")
+              .map((issue) => issue.message),
           },
         ],
       });
@@ -2477,6 +2504,7 @@ export class PipelineRunner {
         humanFeelPassed: humanFeelReport.verdict !== "block",
         emotionPassed,
         structurePassed: missingLogicPassed,
+        payoffPassed,
       },
       candidates: extraction,
       stateDeltas: extraction.stateDeltas,
@@ -2513,6 +2541,7 @@ export class PipelineRunner {
         language: pipelineLang,
         proseQualityReport: relativeToBookDir(bookDir, proseQualityResult.reportPath),
         humanFeelReport: humanFeelReportPath,
+        payoffReport: payoffReportPath,
         auditSummary: auditResult.summary,
         reviewMode: this.config.chapterReviewMode ?? "auto",
       },
@@ -3966,9 +3995,11 @@ ${matrix}`,
       intent: params.intent,
       memo: params.memo,
     });
-    const [dynamicPlotState, eventGraph] = await Promise.all([
+    const [dynamicPlotState, eventGraph, readerContract, payoffTargets] = await Promise.all([
       new DynamicPlotStateStore(params.bookDir).load(),
       new EventCausalGraphStore(params.bookDir).load(),
+      new ReaderContractStore(params.bookDir).ensure(),
+      new PayoffLedgerStore(params.bookDir).dueAt(params.chapterNumber),
     ]);
     const emotionalTrajectory = createDefaultEmotionTrajectory({
       id: spec.emotionalTrajectoryId,
@@ -3980,6 +4011,8 @@ ${matrix}`,
       bookDir: params.bookDir,
       platform: params.book.platform,
       chapterSpec: spec,
+      readerContract,
+      payoffTargets,
       emotionalTrajectory,
       dynamicPlotState,
       relevantEventGraph: eventGraph.slice(-20),

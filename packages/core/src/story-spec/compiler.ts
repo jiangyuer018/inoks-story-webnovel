@@ -18,6 +18,7 @@ import type {
   EmotionTrajectory,
   PsychologyState,
 } from "../narrative-research/types.js";
+import type { PayoffEntry, ReaderContract } from "../story-craft/index.js";
 
 const PLATFORM_PROFILES: Readonly<Record<"fanqie" | "qidian", PlatformProfile>> = {
   fanqie: {
@@ -54,6 +55,8 @@ export async function compileWritingContract(params: {
   readonly bookDir: string;
   readonly platform: Platform;
   readonly chapterSpec: ChapterSpec;
+  readonly readerContract?: ReaderContract;
+  readonly payoffTargets?: ReadonlyArray<PayoffEntry>;
   readonly inheritedConstraints?: Partial<StoryConstraintSet>;
   readonly proseRules?: ReadonlyArray<string>;
   readonly emotionalTrajectory?: EmotionTrajectory;
@@ -71,6 +74,8 @@ export async function compileWritingContract(params: {
   const basis = {
     constraints,
     platformProfile: resolvePlatformProfile(params.platform),
+    readerContract: params.readerContract ?? emptyReaderContract(compiledAt),
+    payoffTargets: params.payoffTargets ?? [],
     chapterSpec: params.chapterSpec,
     sceneContracts: params.chapterSpec.sceneContracts,
     activeBeatContracts: params.chapterSpec.beats.filter((beat) => beat.status === "active" || beat.status === "pending"),
@@ -89,6 +94,20 @@ export async function compileWritingContract(params: {
   };
 }
 
+function emptyReaderContract(updatedAt: string): ReaderContract {
+  return {
+    coreFantasy: [],
+    emotionalPromises: [],
+    progressionPromises: [],
+    relationshipPromises: [],
+    mysteryPromises: [],
+    identityPromises: [],
+    forbiddenBetrayals: [],
+    version: 1,
+    updatedAt,
+  };
+}
+
 export function renderCompiledWritingContract(contract: CompiledWritingContract): string {
   return [
     "## Story Constitution（不可覆盖）",
@@ -99,6 +118,19 @@ export function renderCompiledWritingContract(contract: CompiledWritingContract)
     `- goal: ${contract.chapterSpec.chapterGoal}`,
     `- pov: ${contract.chapterSpec.pov || "按当前大纲"}`,
     `- required state changes: ${contract.chapterSpec.requiredStateChanges.join("；") || "至少一项可观察变化"}`,
+    "",
+    "## Reader Contract",
+    `- core fantasy: ${contract.readerContract.coreFantasy.join("；") || "按 Book Spec"}`,
+    `- progression promises: ${contract.readerContract.progressionPromises.join("；") || "无显式条目"}`,
+    `- relationship promises: ${contract.readerContract.relationshipPromises.join("；") || "无显式条目"}`,
+    `- mystery promises: ${contract.readerContract.mysteryPromises.join("；") || "无显式条目"}`,
+    `- forbidden betrayals: ${contract.readerContract.forbiddenBetrayals.join("；") || "不得无因背叛已建立承诺"}`,
+    ...(contract.payoffTargets.length > 0 ? [
+      "",
+      "## Due Payoff Targets",
+      ...contract.payoffTargets.map((target) =>
+        `- ${target.id}: ${target.promise}；窗口=${target.targetWindow.from}-${target.targetWindow.to}；状态=${target.status}`),
+    ] : []),
     "",
     "## Hard Constraints",
     ...contract.constraints.hard.map((constraint) => `- [${constraint.id}] ${constraint.text}`),

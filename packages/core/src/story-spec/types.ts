@@ -1,3 +1,11 @@
+import type {
+  CanonicalEvent,
+  DynamicPlotState,
+  EmotionTrajectory,
+  PsychologyState,
+} from "../narrative-research/types.js";
+import type { PayoffEntry, ReaderContract } from "../story-craft/index.js";
+
 export type StoryConstraintStrength = "hard" | "soft" | "open";
 export type StorySpecStatus = "draft" | "approved" | "stale" | "superseded";
 
@@ -139,6 +147,8 @@ export interface CompiledWritingContract {
   readonly constitution: ReadonlyArray<string>;
   readonly constraints: StoryConstraintSet;
   readonly platformProfile: PlatformProfile;
+  readonly readerContract: ReaderContract;
+  readonly payoffTargets: ReadonlyArray<PayoffEntry>;
   readonly chapterSpec: ChapterSpec;
   readonly sceneContracts: ReadonlyArray<SceneContract>;
   readonly activeBeatContracts: ReadonlyArray<ControlledNarrativeBeat>;
@@ -178,9 +188,3 @@ export interface StoryConvergenceResult {
   readonly specVersion: number;
   readonly createdAt: string;
 }
-import type {
-  CanonicalEvent,
-  DynamicPlotState,
-  EmotionTrajectory,
-  PsychologyState,
-} from "../narrative-research/types.js";

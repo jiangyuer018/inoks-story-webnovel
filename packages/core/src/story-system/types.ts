@@ -19,7 +19,13 @@ export const STORY_EVENT_TYPES = [
   "open_loop_advanced",
   "open_loop_closed",
   "reader_promise_created",
+  "reader_promise_advanced",
+  "reader_promise_delayed",
+  "reader_promise_threatened",
+  "reader_promise_partially_paid",
   "reader_promise_paid_off",
+  "reader_promise_transformed",
+  "reader_promise_abandoned",
   "character_entered",
   "character_exited",
 ] as const;

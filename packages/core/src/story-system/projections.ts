@@ -20,6 +20,7 @@ import {
   listFutureSpecIds,
   proposeOutlineRevisionFromCommit,
 } from "../narrative-research/index.js";
+import { PayoffLedgerStore } from "../story-craft/index.js";
 
 export type StoryProjector = (commit: ChapterCommit) => Promise<Record<string, unknown> | void>;
 
@@ -86,6 +87,7 @@ export function createDefaultProjectionManager(
     .register("causalGraph", (commit) => new EventCausalGraphStore(bookDir).projectCommit(commit))
     .register("temporalGraph", (commit) => new TemporalKnowledgeGraphStore(bookDir).projectCommit(commit))
     .register("dynamicPlotState", (commit) => projectDynamicPlotState(bookDir, commit))
+    .register("payoffLedger", (commit) => new PayoffLedgerStore(bookDir).projectCommit(commit))
     .register("dynamicOutline", (commit) => projectDynamicOutline(bookDir, commit), false)
     .register("retrievalIndex", (commit) => projectRetrievalIndex(bookDir, commit));
   if (options.afterLegacyProjection) manager.register("legacyCompatibility", options.afterLegacyProjection, false);
