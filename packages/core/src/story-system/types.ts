@@ -102,6 +102,14 @@ export interface ChapterCommit {
     readonly fulfillmentPassed: boolean;
     readonly disambiguationPassed: boolean;
     readonly blockingCount: number;
+    readonly storyConvergencePassed?: boolean;
+    readonly humanFeelPassed?: boolean;
+    readonly emotionPassed?: boolean;
+    readonly payoffPassed?: boolean;
+    readonly structurePassed?: boolean;
+    readonly similarityPassed?: boolean;
+    readonly temporalPassed?: boolean;
+    readonly humanApprovalPassed?: boolean;
   };
   readonly events: ReadonlyArray<StoryEvent>;
   readonly stateDeltas: ReadonlyArray<StateDelta>;

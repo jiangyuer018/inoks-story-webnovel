@@ -110,6 +110,14 @@ export const ChapterCommitSchema = z.object({
     fulfillmentPassed: z.boolean(),
     disambiguationPassed: z.boolean(),
     blockingCount: z.number().int().min(0),
+    storyConvergencePassed: z.boolean().optional(),
+    humanFeelPassed: z.boolean().optional(),
+    emotionPassed: z.boolean().optional(),
+    payoffPassed: z.boolean().optional(),
+    structurePassed: z.boolean().optional(),
+    similarityPassed: z.boolean().optional(),
+    temporalPassed: z.boolean().optional(),
+    humanApprovalPassed: z.boolean().optional(),
   }),
   events: z.array(StoryEventSchema),
   stateDeltas: z.array(StateDeltaSchema),
@@ -124,7 +132,15 @@ export const ChapterCommitSchema = z.object({
   const valid = commit.validation.proseQualityPassed
     && commit.validation.continuityPassed
     && commit.validation.fulfillmentPassed
-    && commit.validation.disambiguationPassed;
+    && commit.validation.disambiguationPassed
+    && commit.validation.storyConvergencePassed !== false
+    && commit.validation.humanFeelPassed !== false
+    && commit.validation.emotionPassed !== false
+    && commit.validation.payoffPassed !== false
+    && commit.validation.structurePassed !== false
+    && commit.validation.similarityPassed !== false
+    && commit.validation.temporalPassed !== false
+    && commit.validation.humanApprovalPassed !== false;
   if (accepted !== valid) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "commit status does not match validation result" });
   }

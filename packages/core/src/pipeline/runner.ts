@@ -97,6 +97,7 @@ import {
   evaluateOutlineControl,
   extractNarrativeLogicNodes,
 } from "../narrative-research/index.js";
+import { auditHumanFeel, saveHumanFeelReport } from "../human-feel/index.js";
 
 const SEQUENCE_LEVEL_CATEGORIES = new Set([
   "Pacing Monotony", "节奏单调",
@@ -2151,6 +2152,15 @@ export class PipelineRunner {
       }
     }
 
+    const humanFeelReport = auditHumanFeel(finalContent, { language: pipelineLang });
+    const humanFeelReportPath = await saveHumanFeelReport({
+      bookDir,
+      chapterNumber,
+      report: humanFeelReport,
+    });
+    let storyConvergencePassed = humanFeelReport.verdict !== "block";
+    let emotionPassed = true;
+    let missingLogicPassed = true;
     const compiledWritingContract = writeInput.compiledWritingContract;
     if (compiledWritingContract) {
       this.logStage(stageLanguage, {
@@ -2168,6 +2178,8 @@ export class PipelineRunner {
       const missingLogicIssues = detectMissingNarrativeLogic(
         extractNarrativeLogicNodes(finalContent),
       );
+      emotionPassed = emotionAudit?.verdict !== "block";
+      missingLogicPassed = !missingLogicIssues.some((issue) => issue.severity === "blocking");
       const convergence = await runStoryConvergence({
         bookDir,
         content: finalContent,
@@ -2204,15 +2216,22 @@ export class PipelineRunner {
           },
           {
             gate: "missing-narrative-logic",
-            passed: !missingLogicIssues.some((issue) => issue.severity === "blocking"),
+            passed: missingLogicPassed,
             blocking: true,
             details: missingLogicIssues
               .filter((issue) => issue.severity === "blocking")
               .map((issue) =>
                 `${issue.fromNode.id} → ${issue.toNode.id}: missing ${issue.missingBridgeTypes.join(", ")}`),
           },
+          {
+            gate: "human-feel",
+            passed: humanFeelReport.verdict !== "block",
+            blocking: true,
+            details: humanFeelReport.blockingIssues.map((issue) => issue.message),
+          },
         ],
       });
+      storyConvergencePassed = convergence.passed;
       if (!convergence.passed) {
         throw new Error(
           `ChapterCommit rejected; Story Convergence blocked chapter ${chapterNumber}: ${convergence.blockingReasons.join("; ")}`,
@@ -2450,8 +2469,15 @@ export class PipelineRunner {
         && !auditResult.parseFailed
         && !auditResult.issues.some((issue) => issue.severity === "critical"),
       fulfillmentPassed: !auditResult.issues.some((issue) =>
-        issue.severity === "critical" && /hook|memo|intent|fulfill|伏笔|意图|节点/i.test(issue.category)),
+        issue.severity === "critical" && /hook|memo|intent|fulfill|伏笔|意图|节点/i.test(issue.category))
+        && storyConvergencePassed,
       blockingCount: proseQualityResult.scan.blockingCount,
+      extendedValidation: {
+        storyConvergencePassed,
+        humanFeelPassed: humanFeelReport.verdict !== "block",
+        emotionPassed,
+        structurePassed: missingLogicPassed,
+      },
       candidates: extraction,
       stateDeltas: extraction.stateDeltas,
       runtimeStateDelta: runtimeProjection?.resolvedDelta ?? normalizedRuntimeStateDelta,
@@ -2486,6 +2512,7 @@ export class PipelineRunner {
       provenance: {
         language: pipelineLang,
         proseQualityReport: relativeToBookDir(bookDir, proseQualityResult.reportPath),
+        humanFeelReport: humanFeelReportPath,
         auditSummary: auditResult.summary,
         reviewMode: this.config.chapterReviewMode ?? "auto",
       },

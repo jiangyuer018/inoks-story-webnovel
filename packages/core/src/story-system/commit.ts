@@ -69,6 +69,17 @@ export function buildChapterCommit(params: {
   readonly continuityPassed: boolean;
   readonly fulfillmentPassed: boolean;
   readonly blockingCount: number;
+  readonly extendedValidation?: Partial<Pick<
+    ChapterCommit["validation"],
+    | "storyConvergencePassed"
+    | "humanFeelPassed"
+    | "emotionPassed"
+    | "payoffPassed"
+    | "structurePassed"
+    | "similarityPassed"
+    | "temporalPassed"
+    | "humanApprovalPassed"
+  >>;
   readonly candidates: ChapterFactCandidates;
   readonly runtimeStateDelta?: RuntimeStateDelta;
   readonly stateDeltas?: ReadonlyArray<StateDelta>;
@@ -119,11 +130,20 @@ export function buildChapterCommit(params: {
     fulfillmentPassed: params.fulfillmentPassed,
     disambiguationPassed,
     blockingCount: params.blockingCount,
+    ...params.extendedValidation,
   };
   const status = validation.proseQualityPassed
     && validation.continuityPassed
     && validation.fulfillmentPassed
     && validation.disambiguationPassed
+    && validation.storyConvergencePassed !== false
+    && validation.humanFeelPassed !== false
+    && validation.emotionPassed !== false
+    && validation.payoffPassed !== false
+    && validation.structurePassed !== false
+    && validation.similarityPassed !== false
+    && validation.temporalPassed !== false
+    && validation.humanApprovalPassed !== false
     ? "accepted" as const
     : "rejected" as const;
   const withoutHash = {
