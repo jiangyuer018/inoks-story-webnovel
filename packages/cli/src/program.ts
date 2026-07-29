@@ -29,7 +29,7 @@ import { fanficCommand } from "./commands/fanfic.js";
 import { shortCommand } from "./commands/short-fiction.js";
 import { forecastCommand } from "./commands/forecast.js";
 import { translateCommand } from "./commands/translate.js";
-import { createStudioCommand, launchStudioEntry } from "./commands/studio.js";
+import { createStudioCommand, DEFAULT_STUDIO_PORT, launchStudioEntry } from "./commands/studio.js";
 import { consolidateCommand } from "./commands/consolidate.js";
 import { createInteractCommand, type InteractCommandHooks } from "./commands/interact.js";
 import { createTuiCommand } from "./commands/tui.js";
@@ -62,7 +62,7 @@ export function createProgram(hooks: ProgramHooks = {}): Command {
     .option("--stream", "Force streaming LLM responses for this CLI run")
     .option("--no-stream", "Force non-streaming LLM responses for this CLI run")
     .action(async () => {
-      await launchStudioEntry(process.cwd(), "4567", { launchStudio: hooks.launchStudio });
+      await launchStudioEntry(process.cwd(), DEFAULT_STUDIO_PORT, { launchStudio: hooks.launchStudio });
     });
 
   program.addCommand(initCommand);

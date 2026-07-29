@@ -12,6 +12,7 @@ import {
   createInteractionToolsFromDeps,
   computeAnalytics,
   loadProjectConfig,
+  ensureProjectDirectoryInitialized,
   loadProjectSession,
   processProjectInteractionRequest,
   resolveSessionActiveBook,
@@ -6783,12 +6784,17 @@ async function listWorkbenchQuality(bookDir: string): Promise<Record<string, Rea
 
 // --- Standalone runner ---
 
+export async function prepareStudioProjectRoot(root: string): Promise<ProjectConfig> {
+  await ensureProjectDirectoryInitialized(root, { language: "zh" });
+  return loadProjectConfig(root, { consumer: "studio", requireApiKey: false });
+}
+
 export async function startStudioServer(
   root: string,
-  port = 4567,
+  port = 4577,
   options?: { readonly staticDir?: string },
 ): Promise<void> {
-  const config = await loadProjectConfig(root, { consumer: "studio", requireApiKey: false });
+  const config = await prepareStudioProjectRoot(root);
 
   const app = createStudioServer(config, root);
 

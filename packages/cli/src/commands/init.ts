@@ -2,7 +2,10 @@ import { Command } from "commander";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { log, logError } from "../utils.js";
-import { initializeProjectDirectory } from "../project-bootstrap.js";
+import {
+  hasGlobalLLMConfig,
+  initializeProjectDirectory,
+} from "../project-bootstrap.js";
 
 export const initCommand = new Command("init")
   .description("Initialize an Inoks Story Webnovel project (current directory by default)")
@@ -17,6 +20,7 @@ export const initCommand = new Command("init")
         language: (opts.lang === "en" ? "en" : "zh"),
         overwriteSupportFiles: true,
       });
+      const globalConfigured = await hasGlobalLLMConfig();
 
       log(`Project initialized at ${projectDir}`);
       log("");
@@ -27,7 +31,7 @@ export const initCommand = new Command("init")
           "  inoks-story book create --title '我的小说' --genre xuanhuan --platform tomato",
           "  # English project? Re-run with: inoks-story init --lang en",
         ];
-      if (global) {
+      if (globalConfigured) {
         log("Global LLM config detected. Ready to go!");
         log("");
         log("Next steps:");

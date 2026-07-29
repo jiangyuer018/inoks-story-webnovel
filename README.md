@@ -85,8 +85,10 @@ pnpm build
 ```bash
 inoks-story init my-novel
 cd my-novel
-inoks-story studio
+inoks-story
 ```
+
+不带子命令的 `inoks-story` 会启动 Studio；`inoks-story studio` 是等价的显式写法。Inoks Story Webnovel 默认使用 `http://localhost:4577`，与原 inkOS 的 `4567` 分离。
 
 CLI 也可直接使用：
 

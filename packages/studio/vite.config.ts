@@ -11,10 +11,10 @@ export default defineConfig({
     },
   },
   server: {
-    port: 4567,
+    port: 4577,
     proxy: {
       "/api/v1/events": {
-        target: `http://localhost:${process.env.INOKS_STORY_STUDIO_PORT ?? "4569"}`,
+        target: `http://localhost:${process.env.INOKS_STORY_STUDIO_PORT ?? "4578"}`,
         changeOrigin: true,
         // SSE needs unbuffered streaming — bypass http-proxy response handling
         selfHandleResponse: true,
@@ -26,7 +26,7 @@ export default defineConfig({
         },
       },
       "/api": {
-        target: `http://localhost:${process.env.INOKS_STORY_STUDIO_PORT ?? "4569"}`,
+        target: `http://localhost:${process.env.INOKS_STORY_STUDIO_PORT ?? "4578"}`,
         changeOrigin: true,
       },
     },

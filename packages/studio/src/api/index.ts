@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const root = resolve(process.argv[2] ?? process.env.INOKS_STORY_PROJECT_ROOT ?? process.cwd());
-const port = parseInt(process.env.INOKS_STORY_STUDIO_PORT ?? "4567", 10);
+const port = parseInt(process.env.INOKS_STORY_STUDIO_PORT ?? "4577", 10);
 
 // Find studio package root (2 levels up from src/api/)
 const studioRoot = resolve(__dirname, "../..");

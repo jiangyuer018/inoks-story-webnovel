@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Studio 启动与项目隔离
+
+- Studio 默认端口改为 `4577`（开发 API 为 `4578`），避免与原 inkOS 的 `4567` 冲突
+- 项目初始化提升为 Core 共享能力；CLI、裸命令和 Studio API 入口都会幂等创建缺失配置，不再因首次启动缺少 `inoks-story-webnovel.json` 返回 500
+- 新项目自动忽略 `.inoks-story-webnovel/` 运行目录，防止服务密钥和会话数据进入版本控制；同时修复全局模型配置存在性提示误报
+
 ### 正文质量与超长篇记忆
 
 - 新增原生中文 `ProseQualityGate`：确定性 blocking/advisory 扫描、项目与书籍白名单、最多两轮自然化修订、连续性/删除比例/文本差异回退、结构化报告和严格模式拒稿目录

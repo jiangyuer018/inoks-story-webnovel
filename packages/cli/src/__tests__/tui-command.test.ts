@@ -29,7 +29,7 @@ describe("tui command", () => {
     await program.parseAsync([], { from: "user" });
 
     expect(launchStudio).toHaveBeenCalledTimes(1);
-    expect(launchStudio).toHaveBeenCalledWith(process.cwd(), "4567");
+    expect(launchStudio).toHaveBeenCalledWith(process.cwd(), "4577");
   });
 
   it("auto-initializes a minimal project before launching Studio by default", async () => {
@@ -46,7 +46,7 @@ describe("tui command", () => {
     expect(launchStudio).toHaveBeenCalledTimes(1);
     const [calledRoot, calledPort] = launchStudio.mock.calls[0] as unknown as [string, string];
     expect(realpathSync(calledRoot)).toBe(realpathSync(tempDir));
-    expect(calledPort).toBe("4567");
+    expect(calledPort).toBe("4577");
   });
 
   it("does not overwrite an existing .env during automatic Studio init", async () => {
@@ -81,6 +81,6 @@ describe("tui command", () => {
     expect(launchStudio).toHaveBeenCalledTimes(1);
     const [calledRoot, calledPort] = launchStudio.mock.calls[0] as unknown as [string, string];
     expect(realpathSync(calledRoot)).toBe(realpathSync(tempDir));
-    expect(calledPort).toBe("4567");
+    expect(calledPort).toBe("4577");
   });
 });

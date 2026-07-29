@@ -45,6 +45,7 @@ describe("project bootstrap", () => {
     const gitignore = await readFile(join(tempDir, ".gitignore"), "utf-8");
     expect(gitignore).toContain("CUSTOM\n");
     expect(gitignore).toContain(".env\n");
+    expect(gitignore).toContain(".inoks-story-webnovel/\n");
     expect(gitignore).toContain("node_modules/\n");
     expect(gitignore).toContain(".DS_Store\n");
   });
@@ -58,6 +59,7 @@ describe("project bootstrap", () => {
     const gitignore = await readFile(join(tempDir, ".gitignore"), "utf-8");
     expect(gitignore).toContain("dist/\n# keep me\n");
     expect(gitignore).toContain(".env\n");
+    expect(gitignore).toContain(".inoks-story-webnovel/\n");
     expect(gitignore).toContain("node_modules/\n");
     expect(gitignore).toContain(".DS_Store\n");
   });

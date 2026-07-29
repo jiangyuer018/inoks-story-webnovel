@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Studio Startup and Project Isolation
+
+- Moved the default Studio port to `4577` (development API: `4578`) to avoid colliding with the original inkOS service on `4567`.
+- Promoted project bootstrap into shared Core functionality; CLI, bare-command, and Studio API startup now idempotently create a missing config instead of returning HTTP 500 on first launch.
+- New projects ignore the `.inoks-story-webnovel/` runtime directory so service secrets and session data stay out of version control, and global-model configuration detection no longer reports false positives.
+
 ### Prose Quality and Long-Form Memory
 
 - Added a native Chinese `ProseQualityGate` with deterministic blocking/advisory scanning, project/book whitelists, at most two naturalization rounds, continuity/deletion/token-diff rollback, structured reports, and strict-mode rejected drafts.

@@ -6,6 +6,8 @@ import { access } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ensureProjectDirectoryInitialized } from "../project-bootstrap.js";
 
+export const DEFAULT_STUDIO_PORT = "4577";
+
 export interface StudioLaunchSpec {
   readonly studioEntry: string;
   readonly command: string;
@@ -183,7 +185,7 @@ export async function launchStudioEntry(
 export function createStudioCommand(hooks: StudioCommandHooks = {}): Command {
   return new Command("studio")
   .description("Start Inoks Story Webnovel Studio web workbench")
-  .option("-p, --port <port>", "Server port", "4567")
+  .option("-p, --port <port>", "Server port", DEFAULT_STUDIO_PORT)
   .action(async (opts) => {
     const root = findProjectRoot();
     const port = opts.port;
