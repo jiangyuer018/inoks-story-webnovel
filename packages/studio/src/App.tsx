@@ -1,7 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useHashRoute } from "./hooks/use-hash-route";
 import type { HashRoute } from "./hooks/use-hash-route";
-import { StudioRail } from "./components/StudioRail";
+import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./pages/Dashboard";
 import { ChatPage } from "./pages/ChatPage";
 import { BookDetail } from "./pages/BookDetail";
@@ -180,12 +180,12 @@ export function App() {
   return (
     <div className="h-screen bg-background text-foreground flex overflow-hidden font-sans">
       {/* Left Sidebar */}
-      <StudioRail nav={nav} activePage={activePage} sse={sse} />
+      <Sidebar nav={nav} activePage={activePage} sse={sse} t={t} />
 
       {/* Center Content */}
       <div className="flex-1 flex flex-col min-w-0 bg-background/30 backdrop-blur-sm">
         {/* Header Strip */}
-        <header className="h-14 shrink-0 flex items-center justify-between gap-2 px-3 sm:px-5 lg:px-8 border-b border-border/40">
+        <header className="h-14 shrink-0 flex items-center justify-between px-8 border-b border-border/40">
           <div className="flex items-center gap-2">
              <button
                onClick={nav.toDashboard}
@@ -194,7 +194,7 @@ export function App() {
                <House size={18} />
                <span>{t("bread.home")}</span>
                <span className="text-muted-foreground/70">/</span>
-               <span className="hidden font-sans sm:inline">inkOS Studio</span>
+               <span className="font-serif">Inoks Story Webnovel Studio</span>
              </button>
           </div>
 
@@ -230,7 +230,7 @@ export function App() {
         </header>
 
         {/* Main Content Area */}
-        <main className="flex-1 relative overflow-y-auto pb-24 scroll-smooth lg:pb-0">
+        <main className="flex-1 relative overflow-y-auto scroll-smooth">
           {route.page === "dashboard" && (
             <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
               <Dashboard nav={nav} sse={sse} theme={theme} t={t} />

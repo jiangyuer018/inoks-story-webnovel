@@ -1,8 +1,8 @@
 /*
-  inkOS Studio — original long-form narrative control surface.
-  System fonts and CSS-native marks avoid copied prototype assets and remote
-  font dependencies.
+  Inoks Story Webnovel Studio — Atmospheric Literary Workbench
+  Fonts: Instrument Serif (Headings/Literary), DM Sans (UI), JetBrains Mono (Data)
 */
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @import "tailwindcss";
 
@@ -37,9 +37,9 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', Georgia, serif;
-  --font-sans: Inter, 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif;
-  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
 
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
@@ -49,58 +49,63 @@
   --shadow-3d-hover: 0 20px 40px -15px oklch(0 0 0 / 0.2), 0 8px 16px -8px oklch(0 0 0 / 0.15);
 }
 
-/* ── Light Mode: editorial operations surface ── */
+/* ── Light Mode: Warm Parchment & Ink ── */
 :root {
-  --radius: 0.7rem;
+  --radius: 0.6rem;
 
-  --background: oklch(0.975 0.006 238);
-  --background-radial:
-    radial-gradient(circle at 75% -10%, oklch(0.94 0.04 205 / 0.7) 0%, transparent 34%),
-    linear-gradient(180deg, oklch(0.99 0.003 238), oklch(0.965 0.008 238));
-  --foreground: oklch(0.20 0.025 245);
+  /* Background: Warm, aged paper with subtle radial light */
+  --background: oklch(0.985 0.005 80);
+  --background-radial: radial-gradient(circle at 50% 0%, oklch(0.995 0.002 85) 0%, oklch(0.985 0.005 80) 100%);
+  --foreground: oklch(0.13 0.02 60);
 
-  --card: oklch(0.995 0.002 238);
-  --card-foreground: oklch(0.20 0.025 245);
+  /* Cards: Crisp sheets on paper */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0.015 60);
 
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.15 0.015 60);
 
-  --primary: oklch(0.48 0.10 211);
-  --primary-foreground: oklch(0.99 0.002 220);
+  /* Primary: Deep Oxblood / Ink */
+  --primary: oklch(0.45 0.12 25);
+  --primary-foreground: oklch(0.98 0.006 76);
 
-  --secondary: oklch(0.93 0.015 230);
-  --secondary-foreground: oklch(0.28 0.035 240);
+  /* Secondary: Soft paper shadow */
+  --secondary: oklch(0.94 0.01 76);
+  --secondary-foreground: oklch(0.25 0.015 60);
 
-  --muted: oklch(0.94 0.01 235);
-  --muted-foreground: oklch(0.47 0.025 240);
+  /* Muted: Faded ink */
+  --muted: oklch(0.94 0.008 76);
+  --muted-foreground: oklch(0.38 0.02 60);
 
-  --accent: oklch(0.92 0.035 196);
-  --accent-foreground: oklch(0.28 0.055 210);
+  /* Accent: Subtle gold leaf */
+  --accent: oklch(0.92 0.02 85);
+  --accent-foreground: oklch(0.25 0.05 60);
 
   --destructive: oklch(0.55 0.18 25);
   --destructive-foreground: oklch(0.98 0 0);
 
-  --border: oklch(0.86 0.014 235);
-  --input: oklch(0.90 0.012 235);
-  --ring: oklch(0.62 0.13 205);
+  --border: oklch(0.84 0.01 76);
+  --input: oklch(0.92 0.005 76);
+  --ring: oklch(0.45 0.12 25);
 }
 
-/* ── Dark Mode: night operations surface ── */
+/* ── Dark Mode: Obsidian & Candlelight ── */
 .dark {
-  --background: oklch(0.145 0.018 245);
-  --background-radial:
-    radial-gradient(circle at 75% -10%, oklch(0.31 0.07 205 / 0.42) 0%, transparent 36%),
-    linear-gradient(180deg, oklch(0.16 0.02 245), oklch(0.125 0.016 245));
-  --foreground: oklch(0.95 0.008 230);
+  /* Background: Deep obsidian with soft top glow */
+  --background: oklch(0.12 0.01 250);
+  --background-radial: radial-gradient(circle at 50% 0%, oklch(0.16 0.015 250) 0%, oklch(0.12 0.01 250) 100%);
+  --foreground: oklch(0.97 0.005 250);
 
-  --card: oklch(0.19 0.022 245);
-  --card-foreground: oklch(0.95 0.008 230);
+  /* Cards: Floating graphite */
+  --card: oklch(0.18 0.015 250);
+  --card-foreground: oklch(0.95 0.005 250);
 
   --popover: oklch(0.18 0.015 250);
   --popover-foreground: oklch(0.95 0.005 250);
 
-  --primary: oklch(0.79 0.13 195);
-  --primary-foreground: oklch(0.15 0.025 245);
+  /* Primary: Warm Amber / Candlelight */
+  --primary: oklch(0.78 0.14 85);
+  --primary-foreground: oklch(0.12 0.01 250);
 
   /* Secondary: Dark slate */
   --secondary: oklch(0.22 0.02 250);
@@ -110,15 +115,16 @@
   --muted: oklch(0.22 0.015 250);
   --muted-foreground: oklch(0.78 0.005 250);
 
-  --accent: oklch(0.29 0.045 205);
-  --accent-foreground: oklch(0.93 0.04 195);
+  /* Accent: Muted gold */
+  --accent: oklch(0.28 0.04 85);
+  --accent-foreground: oklch(0.95 0.06 85);
 
   --destructive: oklch(0.55 0.2 25);
   --destructive-foreground: oklch(0.98 0 0);
 
   --border: oklch(0.30 0.02 250);
   --input: oklch(0.25 0.02 250);
-  --ring: oklch(0.79 0.13 195);
+  --ring: oklch(0.78 0.14 85);
 }
 
 body {
@@ -163,29 +169,26 @@ button:not(:disabled):active {
   transition: transform 0.1s ease;
 }
 
-/* Subtle grid communicates a control surface without external imagery. */
+/* Subtle grain texture for physical feel */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 50;
-  opacity: 0.24;
-  background-image:
-    linear-gradient(to right, color-mix(in oklch, var(--border) 36%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in oklch, var(--border) 30%, transparent) 1px, transparent 1px);
-  background-size: 32px 32px;
-  mask-image: linear-gradient(to bottom, black, transparent 46%);
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
 }
 
-/* Literary content keeps a Chinese serif voice; control labels remain sans. */
+/* Serif headings with literary character */
 h1, h2, h3, h4 {
   font-family: var(--font-serif);
-  letter-spacing: -0.025em;
-  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-weight: 500;
 }
 
-h1 { font-size: 2.25rem; }
+h1 { font-size: 2.25rem; font-style: italic; }
 h2 { font-size: 1.75rem; }
 h3 { font-size: 1.25rem; }
 
@@ -249,14 +252,6 @@ h3 { font-size: 1.25rem; }
 .paper-sheet:hover {
   box-shadow: var(--shadow-3d-hover);
   border-color: var(--primary);
-}
-
-.studio-rail {
-  background:
-    radial-gradient(circle at 20% 0%, rgb(34 211 238 / 0.09), transparent 28%),
-    linear-gradient(180deg, #101923, #0a1119 68%, #080e15);
-  color: #dbe5ef;
-  box-shadow: 18px 0 44px rgb(2 8 23 / 0.10);
 }
 
 /* ── ChatPanel Animations ── */

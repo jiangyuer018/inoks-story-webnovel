@@ -71,10 +71,8 @@ planning research. No paper implementation, dataset, model weights, or source co
 All schemas, thresholds, prompts, recovery behavior, and TypeScript code were independently
 implemented for this repository.
 
-## Studio prototype boundary
+## Studio UI boundary
 
-Prototype products and screenshots were used only to understand information density and hierarchy.
-The current Studio shell uses an original function-led navigation structure, CSS-native `inkOS`
-mark, system fonts, color tokens, responsive mobile dock, interaction copy, and component code.
-It does not ship copied prototype logos, remote prototype fonts, platform pages, or third-party
-UI source.
+The V2 controls are integrated into the existing Inoks Story Webnovel Studio shell and reuse its
+repository-owned Sidebar, logo, theme tokens, typography, and UI components. No UI code or branded
+asset was copied from an external prototype.

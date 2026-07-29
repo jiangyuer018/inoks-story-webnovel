@@ -176,7 +176,7 @@ inoks-story publish import-log <book-id> --platform fanqie --file upload.log
 inoks-story eval ablation --input ablation-runs.json --output ablation-report.json
 ```
 
-Studio 已按生产职责重新构造为原创控制面：生产、连载作品、研究资产、运行治理，以及作品内的规格、质量、正史和发布链。未复制原型项目的 Logo、远程字体、布局代码或平台页面。
+Studio 保留 inkOS 既有界面与操作方式，并把规格、动态大纲、质量、正史、自动化和发布控制作为作品内的“故事控制”入口接入。新增页面复用原有 Sidebar、Logo、主题 token、按钮、表单、弹层和排版组件。
 
 ## 架构与使用文档
 
