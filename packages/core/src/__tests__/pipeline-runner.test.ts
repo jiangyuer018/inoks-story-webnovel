@@ -23,6 +23,11 @@ import { MemoryDB } from "../state/memory-db.js";
 import * as memoryDbModule from "../state/memory-db.js";
 import { countChapterLength } from "../utils/length-metrics.js";
 import { migrateLegacyStorySystem } from "../story-system/migration.js";
+import {
+  ChapterCommitStore,
+  runStorySystemPreflight,
+  sha256,
+} from "../story-system/index.js";
 
 const require = createRequire(import.meta.url);
 const hasNodeSqlite = (() => {
@@ -1409,6 +1414,99 @@ describe("PipelineRunner", () => {
 
       const book = await state.loadBookConfig(bookId);
       expect(book.status).toBe("active");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stably finalizes the first chapter through quality, audit, commit, and projections", async () => {
+    const { root, runner, state, bookId } = await createRunnerFixture({
+      inputGovernanceMode: "v2",
+    });
+    const bookDir = state.bookDir(bookId);
+    const finalBody = [
+      "雨停后，林越推开仓门。木桌上的铜令还沾着水，角落却多了一道新划痕。",
+      "他把灯移近，叫来守夜人核对交接簿。守夜人翻到昨夜那页，指着被撕去的半张纸。",
+      "巷口传来车轮声。林越收起铜令，沿着泥地上的窄辙追了出去。",
+    ].join("\n\n");
+    const stages: string[] = [];
+
+    vi.spyOn(WriterAgent.prototype, "writeChapter").mockImplementation(async () => {
+      stages.push("writer");
+      return createWriterOutput({
+        chapterNumber: 1,
+        title: "雨后铜令",
+        content: finalBody,
+        wordCount: finalBody.length,
+        postSettlement: "",
+      });
+    });
+    vi.spyOn(ContinuityAuditor.prototype, "auditChapter").mockImplementation(async () => {
+      stages.push("continuity");
+      return createAuditResult({
+        passed: true,
+        issues: [],
+        summary: "clean",
+      });
+    });
+    vi.spyOn(ChapterAnalyzerAgent.prototype, "analyzeChapter").mockImplementation(async () => {
+      stages.push("facts");
+      const qualityReport = await readFile(
+        join(bookDir, "quality", "prose", "chapter-0001.json"),
+        "utf-8",
+      );
+      expect(JSON.parse(qualityReport)).toMatchObject({
+        finalStatus: "passed",
+      });
+      return createAnalyzedOutput({
+        chapterNumber: 1,
+        title: "雨后铜令",
+        content: finalBody,
+        wordCount: finalBody.length,
+      });
+    });
+
+    try {
+      const result = await runner.writeDraft(bookId, "追查铜令失窃", 220);
+      const rawChapter = await readFile(result.filePath, "utf-8");
+      const chapterBody = rawChapter.replace(/^# .*\r?\n+/, "");
+      const commitStore = new ChapterCommitStore(bookDir);
+      const head = await commitStore.loadHead();
+      const preflight = await runStorySystemPreflight({
+        bookDir,
+        strict: true,
+        blockOnProjectionFailure: true,
+      });
+
+      expect(stages[0]).toBe("writer");
+      expect(stages.indexOf("continuity")).toBeGreaterThan(stages.indexOf("writer"));
+      expect(stages.indexOf("facts")).toBeGreaterThan(stages.indexOf("continuity"));
+      expect(result).toMatchObject({
+        chapterNumber: 1,
+        title: "雨后铜令",
+      });
+      expect(head).toMatchObject({
+        chapter: 1,
+        status: "accepted",
+        source: {
+          contentHash: sha256(chapterBody),
+        },
+      });
+      expect(await state.loadChapterIndex(bookId)).toEqual([
+        expect.objectContaining({
+          number: 1,
+          proseQuality: expect.objectContaining({
+            blockingCount: 0,
+            reportPath: "quality/prose/chapter-0001.json",
+          }),
+        }),
+      ]);
+      expect(preflight).toMatchObject({
+        passed: true,
+        headChapter: 1,
+        headCommitId: head?.commitId,
+        errors: [],
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

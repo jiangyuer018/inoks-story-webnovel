@@ -9,6 +9,9 @@
 - Moved the default Studio port to `4577` (development API: `4578`) to avoid colliding with the original inkOS service on `4567`.
 - Promoted project bootstrap into shared Core functionality; CLI, bare-command, and Studio API startup now idempotently create a missing config instead of returning HTTP 500 on first launch.
 - New projects ignore the `.inoks-story-webnovel/` runtime directory so service secrets and session data stay out of version control, and global-model configuration detection no longer reports false positives.
+- Fixed the Story Workbench treating “no quality report yet” as a quality blocker and reading the oldest report instead of the newest; new books now lead directly to first-chapter generation.
+- Added a Studio legacy-history migration preview and explicit apply step. Applying creates a chapter/story backup before building the ChapterCommit chain and replaying projections.
+- Rebuilt the next-action component with existing Studio status and button primitives, deriving its action from actual legacy-history, quality, Commit, and projection state.
 
 ### Prose Quality and Long-Form Memory
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ArrowRight,
   BookOpenCheck,
   Check,
   Download,
@@ -9,14 +10,21 @@ import {
   Lock,
   Pause,
   Play,
+  RotateCcw,
   ShieldCheck,
   Upload,
+  Wrench,
   X,
 } from "lucide-react";
 import { postApi, putApi, useApi } from "../hooks/use-api";
 import { Button } from "../components/ui/button";
+import {
+  deriveWorkbenchOverviewState,
+  formatStoryMigrationWarning,
+  formatStorySystemIssue,
+} from "./story-workbench-state";
 
-type Tab = "overview" | "spec" | "outline" | "benchmark" | "quality" | "canon" | "automation" | "publishing";
+type Tab = "overview" | "spec" | "outline" | "benchmark" | "quality" | "canon" | "system" | "automation" | "publishing";
 
 interface StoryWorkbenchData {
   readonly bookId: string;
@@ -95,6 +103,13 @@ interface StoryWorkbenchData {
     readonly errors: ReadonlyArray<string>;
     readonly warnings: ReadonlyArray<string>;
   };
+  readonly storySystem: {
+    readonly acceptedCommitCount: number;
+    readonly rejectedCommitCount: number;
+    readonly projectionFailures: ReadonlyArray<string>;
+    readonly latestMigration: StoryMigrationReport | null;
+    readonly automaticPublicationEnabled: false;
+  };
   readonly quality: {
     readonly prose: ReadonlyArray<QualityReport>;
     readonly "human-feel": ReadonlyArray<HumanFeelReport>;
@@ -146,6 +161,7 @@ const TABS: ReadonlyArray<{ readonly id: Tab; readonly zh: string; readonly en: 
   { id: "benchmark", zh: "对标机制", en: "Benchmark" },
   { id: "quality", zh: "质量审查", en: "Quality" },
   { id: "canon", zh: "正史提交", en: "Canon" },
+  { id: "system", zh: "系统与投影", en: "System" },
   { id: "automation", zh: "自动化", en: "Automation" },
   { id: "publishing", zh: "发布", en: "Publishing" },
 ];
@@ -197,7 +213,7 @@ export function StoryWorkbench({
           </button>
           <h1 className="mt-2 text-3xl">故事控制中心</h1>
           <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-            从章纲到外部发布，每一步都显示来源、阻断项和下一项人工动作。
+            从章纲到发布交付，每一步都显示来源、阻断项和下一项人工动作。
           </p>
         </div>
         <HeadStatus data={data} />
@@ -227,12 +243,19 @@ export function StoryWorkbench({
         </div>
       )}
 
-      {tab === "overview" && <OverviewPanel data={data} setTab={setTab} />}
+      {tab === "overview" && (
+        <OverviewPanel
+          data={data}
+          setTab={setTab}
+          toBook={() => nav.toBook(bookId)}
+        />
+      )}
       {tab === "spec" && <SpecPanel data={data} />}
       {tab === "outline" && <OutlinePanel data={data} busy={busy} act={act} path={path} />}
       {tab === "benchmark" && <BenchmarkPanel data={data} busy={busy} act={act} path={path} />}
       {tab === "quality" && <QualityPanel data={data} busy={busy} act={act} path={path} />}
       {tab === "canon" && <CanonPanel data={data} />}
+      {tab === "system" && <SystemPanel data={data} path={path} busy={busy} act={act} bookId={bookId} />}
       {tab === "automation" && <AutomationPanel data={data} busy={busy} act={act} path={path} />}
       {tab === "publishing" && <PublishingPanel data={data} busy={busy} act={act} path={path} />}
     </div>
@@ -258,28 +281,24 @@ function HeadStatus({ data }: { readonly data: StoryWorkbenchData }) {
 function OverviewPanel({
   data,
   setTab,
+  toBook,
 }: {
   readonly data: StoryWorkbenchData;
   readonly setTab: (tab: Tab) => void;
+  readonly toBook: () => void;
 }) {
-  const latestProse = data.quality.prose.at(-1);
-  const latestHuman = data.quality["human-feel"].at(-1);
-  const prosePassed = Boolean(latestProse)
-    && (latestProse?.blockingCount ?? 0) === 0
-    && !/reject|failed|blocked/i.test(latestProse?.finalStatus ?? "");
-  const humanPassed = Boolean(latestHuman)
-    && !/revise|reject|failed|blocked/i.test(latestHuman?.verdict ?? latestHuman?.level ?? "");
   const pendingOutline = data.outlineRevisions.filter((revision) => revision.status === "proposed").length;
   const publication = data.publications.at(-1);
-  const next = pendingOutline > 0
-    ? { label: "处理动态大纲提案", tab: "outline" as const }
-    : !prosePassed || !humanPassed
-      ? { label: "检查正文质量报告", tab: "quality" as const }
-      : !data.storyHead
-        ? { label: "核对正史提交条件", tab: "canon" as const }
-        : !data.storyPreflight.passed
-          ? { label: "修复正史或投影异常", tab: "canon" as const }
-          : { label: "准备发布包", tab: "publishing" as const };
+  const overview = deriveWorkbenchOverviewState({
+    pendingOutlineCount: pendingOutline,
+    storyHeadChapter: data.storyHead?.chapter ?? null,
+    storyPreflightPassed: data.storyPreflight.passed,
+    storyPreflightErrors: data.storyPreflight.errors,
+    rejectedCommitCount: data.storySystem.rejectedCommitCount,
+    proseReports: data.quality.prose,
+    humanReports: data.quality["human-feel"],
+  });
+  const { latestProse, latestHuman, nextAction } = overview;
   const stages = [
     {
       label: "章纲与约束",
@@ -294,7 +313,7 @@ function OverviewPanel({
     {
       label: "正文质量门",
       detail: latestProse ? `Prose ${latestProse.score ?? "已扫描"} · Human ${latestHuman?.score ?? "待审"}` : "尚无正文报告",
-      state: prosePassed && humanPassed ? "done" : latestProse ? "attention" : "waiting",
+      state: overview.qualityState,
     },
     {
       label: "ChapterCommit",
@@ -311,9 +330,9 @@ function OverviewPanel({
       state: !data.storyHead ? "waiting" : data.storyPreflight.passed ? "done" : "attention",
     },
     {
-      label: "外部发布",
-      detail: publication ? `${publication.platform} · ${publication.status}` : "尚未生成发布包",
-      state: publication?.status === "published_external" ? "done" : publication?.status === "failed_external" ? "attention" : "waiting",
+      label: "发布交付",
+      detail: publication ? `${publication.platform} · ${publication.status}` : "仅支持手动导出与人工确认",
+      state: publication?.status === "failed_external" ? "attention" : "waiting",
     },
   ] as const;
 
@@ -339,13 +358,34 @@ function OverviewPanel({
         </div>
       </div>
       <aside className="space-y-4">
-        <div className="rounded-2xl bg-slate-950 p-5 text-slate-100 shadow-lg dark:bg-slate-900">
-          <p className="text-xs font-semibold tracking-[0.14em] text-cyan-300">NEXT HUMAN ACTION</p>
-          <h2 className="mt-3 font-sans text-lg font-semibold">{next.label}</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-400">自动化不会越过待批准提案、质量阻断或失败投影。</p>
-          <Button className="mt-5 w-full bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={() => setTab(next.tab)}>
-            前往处理
+        <div className={`rounded-2xl border p-5 ${
+          nextAction.requiresAttention
+            ? "border-amber-500/35 bg-amber-500/[0.07]"
+            : "border-primary/25 bg-card"
+        }`}>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium text-muted-foreground">下一步</p>
+            <StatusBadge value={nextAction.requiresAttention ? "待处理" : "可继续"} />
+          </div>
+          <h2 className="mt-3 font-sans text-lg font-semibold">{nextAction.title}</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{nextAction.description}</p>
+          <Button
+            className="mt-5 w-full"
+            variant={nextAction.requiresAttention ? "default" : "outline"}
+            onClick={() => {
+              if (nextAction.destination === "book") {
+                toBook();
+              } else {
+                setTab(nextAction.destination);
+              }
+            }}
+          >
+            {nextAction.buttonLabel}
+            <ArrowRight size={15} />
           </Button>
+          <p className="mt-3 text-xs leading-5 text-muted-foreground">
+            待批准提案、质量阻断和失败投影会暂停自动写章。
+          </p>
         </div>
         <div className="rounded-2xl border border-border bg-card p-5">
           <p className="text-xs text-muted-foreground">自动写作</p>
@@ -403,6 +443,164 @@ function CanonPanel({ data }: { readonly data: StoryWorkbenchData }) {
         </div>
       </div>
     </section>
+  );
+}
+
+function SystemPanel(props: PanelProps & { readonly bookId: string }) {
+  const { data } = props;
+  const failures = data.storySystem.projectionFailures;
+  const legacyHistoryNeedsMigration = data.storyPreflight.errors.some((error) =>
+    error.startsWith("legacy-history-unmigrated:"));
+  const repairable = !data.storyPreflight.passed || failures.length > 0;
+  const [migrationPreview, setMigrationPreview] = useState<StoryMigrationReport | null>(
+    data.storySystem.latestMigration,
+  );
+  const effectiveMigrationPreview = migrationPreview ?? data.storySystem.latestMigration;
+  return (
+    <section className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl">系统与派生投影</h2>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            accepted Commit 是唯一正史来源。记忆库、Markdown 真相文件、检索索引和摘要都可从 Commit 链重建。
+          </p>
+        </div>
+        <StatusBadge value={data.storyPreflight.passed ? "healthy" : "attention"} />
+      </div>
+
+      <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+        <CanonicalValue label="accepted Commit" value={data.storySystem.acceptedCommitCount} />
+        <CanonicalValue label="rejected Commit" value={data.storySystem.rejectedCommitCount} />
+        <CanonicalValue label="待补投影" value={failures.length} />
+        <CanonicalValue label="自动发布" value="已禁用" />
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="rounded-xl border border-border bg-card">
+          <header className="border-b border-border px-5 py-4">
+            <h3 className="text-base font-semibold">预检结果</h3>
+            <p className="mt-1 text-sm text-muted-foreground">每次写入下一章前都会重新检查 Commit 链、章节哈希、事务和必需投影。</p>
+          </header>
+          <div className="divide-y divide-border">
+            {data.storyPreflight.errors.length === 0 && data.storyPreflight.warnings.length === 0 && failures.length === 0 && (
+              <div className="px-5 py-6 text-sm text-emerald-700 dark:text-emerald-300">没有待处理的正史或投影问题。</div>
+            )}
+            {data.storyPreflight.errors.map((entry) => <SystemIssue key={`error:${entry}`} tone="error" text={entry} />)}
+            {data.storyPreflight.warnings.map((entry) => <SystemIssue key={`warning:${entry}`} tone="warning" text={entry} />)}
+            {failures.map((entry) => <SystemIssue key={`projection:${entry}`} tone="error" text={`Projection pending: ${entry}`} />)}
+          </div>
+        </div>
+        {legacyHistoryNeedsMigration ? (
+          <aside className="rounded-xl border border-amber-500/35 bg-amber-500/[0.07] p-5">
+            <BookOpenCheck size={18} className="text-amber-700 dark:text-amber-300" />
+            <h3 className="mt-3 text-base font-semibold">迁移旧章节历史</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              先生成只读迁移预览。确认后，系统会备份章节与 story 目录，再建立 Commit 链并重放所有投影。
+            </p>
+            {!effectiveMigrationPreview ? (
+              <ActionButton
+                className="mt-5 w-full"
+                busy={props.busy === "story-migrate-preview"}
+                onClick={() => props.act(
+                  "story-migrate-preview",
+                  async () => {
+                    const report = await postApi<StoryMigrationReport>(
+                      `/books/${encodeURIComponent(props.bookId)}/story-migrate`,
+                      { apply: false },
+                    );
+                    setMigrationPreview(report);
+                  },
+                  "迁移预览已生成，尚未切换正史权限。",
+                )}
+              >
+                预览迁移
+              </ActionButton>
+            ) : (
+              <div className="mt-5 space-y-4">
+                <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-border">
+                  <MigrationValue label="章节" value={effectiveMigrationPreview.chapterCount} />
+                  <MigrationValue label="候选 Commit" value={effectiveMigrationPreview.commitIds.length} />
+                </dl>
+                <List
+                  values={effectiveMigrationPreview.warnings.map(formatStoryMigrationWarning)}
+                  empty=""
+                />
+                <ActionButton
+                  className="w-full"
+                  busy={props.busy === "story-migrate-apply"}
+                  onClick={() => props.act(
+                    "story-migrate-apply",
+                    async () => {
+                      const report = await postApi<StoryMigrationReport>(
+                        `/books/${encodeURIComponent(props.bookId)}/story-migrate`,
+                        { apply: true, confirmBookId: props.bookId },
+                      );
+                      setMigrationPreview(report);
+                    },
+                    "旧章节已备份并迁移到 ChapterCommit 权限，投影已重放。",
+                  )}
+                >
+                  <ShieldCheck size={14} /> 备份并启用 ChapterCommit
+                </ActionButton>
+                <p className="break-all text-xs leading-5 text-muted-foreground">
+                  预览报告：{effectiveMigrationPreview.reportPath}
+                </p>
+              </div>
+            )}
+          </aside>
+        ) : (
+          <aside className="rounded-xl border border-border bg-card p-5">
+            <Wrench size={18} className="text-primary" />
+            <h3 className="mt-3 text-base font-semibold">修复与重放</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              修复只重放 accepted Commit 的派生数据，不会改写正文、Commit 或事件日志。
+            </p>
+            <ActionButton
+              className="mt-5 w-full"
+              variant={repairable ? "default" : "outline"}
+              busy={props.busy === "story-repair"}
+              onClick={() => props.act(
+                "story-repair",
+                () => postApi(`/books/${encodeURIComponent(props.bookId)}/story-repair`, {}),
+                repairable ? "已完成修复并重新执行预检。" : "已重新执行投影修复与预检。",
+              )}
+            >
+              <RotateCcw size={14} /> {repairable ? "修复投影并复检" : "验证并重放投影"}
+            </ActionButton>
+            <p className="mt-4 text-xs leading-5 text-muted-foreground">
+              外部发布仍需手动导出、人工上传，并通过外部日志或人工确认回填状态。
+            </p>
+          </aside>
+        )}
+      </div>
+    </section>
+  );
+}
+
+interface StoryMigrationReport {
+  readonly migrationId: string;
+  readonly applied: boolean;
+  readonly chapterCount: number;
+  readonly commitIds: ReadonlyArray<string>;
+  readonly reportPath: string;
+  readonly warnings: ReadonlyArray<string>;
+}
+
+function MigrationValue({ label, value }: { readonly label: string; readonly value: string | number }) {
+  return (
+    <div className="bg-card px-3 py-2">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 text-sm font-medium">{value}</dd>
+    </div>
+  );
+}
+
+function SystemIssue({ tone, text }: { readonly tone: "error" | "warning"; readonly text: string }) {
+  return (
+    <div className={`flex items-start gap-3 px-5 py-4 text-sm ${tone === "error" ? "text-destructive" : "text-amber-700 dark:text-amber-300"}`}>
+      <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+      <p className="min-w-0 break-words">{formatStorySystemIssue(text)}</p>
+    </div>
   );
 }
 
@@ -773,7 +971,10 @@ function PublishingPanel(props: PanelProps) {
     <section className="space-y-5">
       <div>
         <h2 className="text-xl">发布导出</h2>
-        <p className="mt-1 text-sm text-muted-foreground">只导出 accepted Commit。生成 ZIP 不代表发布成功，外部状态必须确认或导入日志。</p>
+        <p className="mt-1 text-sm text-muted-foreground">自动发布未启用。只导出 accepted Commit，生成 ZIP 不代表发布成功，外部状态必须确认或导入日志。</p>
+      </div>
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+        本版本不包含向番茄、起点或其他平台自动上传的能力。此处只生成手动交付包，并记录人工确认的外部结果。
       </div>
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4">
         <label className="text-sm">

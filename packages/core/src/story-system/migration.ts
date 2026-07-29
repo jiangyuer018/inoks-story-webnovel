@@ -31,6 +31,30 @@ export interface StoryMigrationReport {
   }>;
 }
 
+export async function loadLatestStoryMigrationReport(
+  bookDir: string,
+): Promise<StoryMigrationReport | null> {
+  const migrationsDir = join(bookDir, ".inoks-story-webnovel", "story-system", "migrations");
+  const names = await readdir(migrationsDir).catch(() => [] as string[]);
+  let latest: { readonly report: StoryMigrationReport; readonly modifiedAt: number } | null = null;
+  for (const name of names) {
+    const reportPath = join(migrationsDir, name, "report.json");
+    const raw = await readFile(reportPath, "utf-8").catch(() => "");
+    if (!raw) continue;
+    try {
+      const report = JSON.parse(raw) as StoryMigrationReport;
+      const modifiedAt = await stat(reportPath).then((value) => value.mtimeMs, () => 0);
+      if (!latest || modifiedAt > latest.modifiedAt) {
+        latest = { report, modifiedAt };
+      }
+    } catch {
+      // An interrupted/invalid report is represented by its checkpoint and must
+      // not be surfaced as an actionable completed preview.
+    }
+  }
+  return latest?.report ?? null;
+}
+
 /**
  * Bootstrap an existing Inoks Story Webnovel book into the commit authority without changing
  * its chapter text. Dry-run is the default; --apply is deliberately explicit.

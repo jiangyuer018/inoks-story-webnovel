@@ -53,6 +53,8 @@ import {
   latestProjectionFailures,
   replayStorySystem,
   repairStorySystem,
+  migrateLegacyStorySystem,
+  loadLatestStoryMigrationReport,
   runStorySystemPreflight,
   GLOBAL_ENV_PATH,
   COVER_PROVIDER_PRESETS,
@@ -4151,8 +4153,13 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     const writing = raw.writing && typeof raw.writing === "object"
       ? raw.writing as Record<string, unknown>
       : {};
+    const configuredMode = WritingAutomationModeSchema.parse(writing.automationMode ?? "review-first");
+    // External publishing remains deliberately unavailable in this release.
+    // Preserve legacy configuration on disk, but never expose it as an effective mode.
+    const automationMode = configuredMode === "auto-publish" ? "auto-draft" : configuredMode;
     return c.json({
-      automationMode: WritingAutomationModeSchema.parse(writing.automationMode ?? "review-first"),
+      automationMode,
+      publicationAutomationEnabled: false,
       proseQuality: ProseQualityConfigSchema.parse(writing.proseQuality ?? {}),
       longFormMemory: LongFormMemoryConfigSchema.parse(writing.longFormMemory ?? {}),
     });
@@ -4160,7 +4167,13 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
 
   app.put("/api/v1/project/prose-quality", async (c) => {
     const body = await c.req.json<{ automationMode?: unknown; proseQuality?: unknown; longFormMemory?: unknown }>();
-    const automationMode = WritingAutomationModeSchema.parse(body.automationMode ?? "review-first");
+    const requestedAutomationMode = WritingAutomationModeSchema.parse(body.automationMode ?? "review-first");
+    if (requestedAutomationMode === "auto-publish") {
+      return c.json({
+        error: "Automatic external publishing is not enabled. Use auto-draft and export a publication package manually.",
+      }, 409);
+    }
+    const automationMode = requestedAutomationMode;
     const proseQuality = ProseQualityConfigSchema.parse(body.proseQuality ?? {});
     const longFormMemory = LongFormMemoryConfigSchema.parse(body.longFormMemory ?? {});
     const raw = await loadRawConfig(root);
@@ -4171,7 +4184,13 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       longFormMemory,
     };
     await saveRawConfig(root, raw);
-    return c.json({ ok: true, automationMode, proseQuality, longFormMemory });
+    return c.json({
+      ok: true,
+      automationMode,
+      publicationAutomationEnabled: false,
+      proseQuality,
+      longFormMemory,
+    });
   });
 
   app.get("/api/v1/books/:id/quality/prose/:chapter", async (c) => {
@@ -4222,6 +4241,38 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     return c.json({ ok: preflight.passed, ...repair, preflight });
   });
 
+  app.post("/api/v1/books/:id/story-migrate", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: "Invalid book id" }, 400);
+    const body: { apply?: unknown; confirmBookId?: unknown } = await c.req
+      .json<{ apply?: unknown; confirmBookId?: unknown }>()
+      .catch(() => ({}));
+    const apply = body.apply === true;
+    if (apply && body.confirmBookId !== id) {
+      return c.json({
+        error: "Applying a Story System migration requires confirmBookId to match the requested book.",
+      }, 400);
+    }
+    const releaseLock = await state.acquireBookLock(id);
+    try {
+      const report = await migrateLegacyStorySystem({
+        projectRoot: root,
+        bookDir: state.bookDir(id),
+        bookId: id,
+        apply,
+      });
+      return c.json(report);
+    } catch (error) {
+      throw new ApiError(
+        409,
+        "STORY_MIGRATION_REJECTED",
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      await releaseLock();
+    }
+  });
+
   app.get("/api/v1/books/:id/story-workbench", async (c) => {
     const id = c.req.param("id");
     if (!isSafeBookId(id)) return c.json({ error: "Invalid book id" }, 400);
@@ -4261,6 +4312,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       storyHead,
       storyPreflight,
       quality,
+      commits,
+      projectionFailures,
+      latestMigration,
     ] = await Promise.all([
       state.loadBookConfig(id),
       loadStoryConstitution(bookDir),
@@ -4277,6 +4331,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
         blockOnProjectionFailure: true,
       }),
       listWorkbenchQuality(bookDir),
+      new ChapterCommitStore(bookDir).listCommits(),
+      latestProjectionFailures(bookDir),
+      loadLatestStoryMigrationReport(bookDir),
     ]);
     return c.json({
       bookId: id,
@@ -4294,6 +4351,13 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
         ? { commitId: storyHead.commitId, chapter: storyHead.chapter, hash: storyHead.source.contentHash }
         : null,
       storyPreflight,
+      storySystem: {
+        acceptedCommitCount: commits.filter((commit) => commit.status === "accepted").length,
+        rejectedCommitCount: commits.filter((commit) => commit.status === "rejected").length,
+        projectionFailures,
+        latestMigration,
+        automaticPublicationEnabled: false,
+      },
       quality,
     });
   });

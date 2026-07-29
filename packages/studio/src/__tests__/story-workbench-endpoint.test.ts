@@ -77,14 +77,14 @@ describe("Story workbench API", () => {
     expect(body.automation.runtime).toMatchObject({ paused: true, pauseReason: "editor review" });
   });
 
-  it("keeps project writing automation modes separate from chat interaction modes", async () => {
+  it("keeps project writing automation modes separate from chat interaction modes and rejects automatic publishing", async () => {
     await writeFile(join(root, "inoks-story-webnovel.json"), "{}\n", "utf-8");
     const app = createStudioServer({} as never, root);
     const updated = await app.request("/api/v1/project/prose-quality", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        automationMode: "auto-publish",
+        automationMode: "auto-draft",
         proseQuality: { enforcement: "balanced" },
         longFormMemory: { sequenceSize: 10 },
       }),
@@ -92,7 +92,8 @@ describe("Story workbench API", () => {
 
     expect(updated.status).toBe(200);
     expect(await updated.json()).toMatchObject({
-      automationMode: "auto-publish",
+      automationMode: "auto-draft",
+      publicationAutomationEnabled: false,
       proseQuality: { enforcement: "balanced" },
       longFormMemory: { sequenceSize: 10 },
     });
@@ -100,9 +101,101 @@ describe("Story workbench API", () => {
     const loaded = await app.request("/api/v1/project/prose-quality");
     expect(loaded.status).toBe(200);
     expect(await loaded.json()).toMatchObject({
-      automationMode: "auto-publish",
+      automationMode: "auto-draft",
+      publicationAutomationEnabled: false,
       proseQuality: { enforcement: "balanced" },
       longFormMemory: { sequenceSize: 10 },
+    });
+  });
+
+  it("does not accept automatic external publishing before that capability is enabled", async () => {
+    await writeFile(join(root, "inoks-story-webnovel.json"), "{}\n", "utf-8");
+    const app = createStudioServer({} as never, root);
+    const response = await app.request("/api/v1/project/prose-quality", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ automationMode: "auto-publish" }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining("not enabled") });
+  });
+
+  it("previews and explicitly applies legacy chapter migration under the book lock", async () => {
+    const bookDir = join(root, "books", "demo");
+    const chapterDir = join(bookDir, "chapters");
+    const storyDir = join(bookDir, "story");
+    await Promise.all([
+      mkdir(chapterDir, { recursive: true }),
+      mkdir(storyDir, { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(chapterDir, "0001_开门.md"), "# 第1章 开门\n\n林越推开仓门。\n", "utf-8"),
+      writeFile(join(chapterDir, "0002_追踪.md"), "# 第2章 追踪\n\n他沿着车辙追了出去。\n", "utf-8"),
+      writeFile(join(storyDir, "current_state.md"), "# 当前状态\n\n- 林越正在追踪铜令。\n", "utf-8"),
+      writeFile(join(storyDir, "pending_hooks.md"), "# 待处理伏笔\n", "utf-8"),
+      writeFile(join(storyDir, "chapter_summaries.md"), "# 章节摘要\n", "utf-8"),
+    ]);
+    const app = createStudioServer({} as never, root);
+
+    const before = await app.request("/api/v1/books/demo/story-workbench");
+    expect(before.status).toBe(200);
+    expect(await before.json()).toMatchObject({
+      storyHead: null,
+      storyPreflight: {
+        passed: false,
+        errors: [expect.stringContaining("legacy-history-unmigrated")],
+      },
+    });
+
+    const preview = await app.request("/api/v1/books/demo/story-migrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apply: false }),
+    });
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({
+      applied: false,
+      chapterCount: 2,
+      commitIds: [expect.stringMatching(/^commit-/), expect.stringMatching(/^commit-/)],
+    });
+    expect(await (await app.request("/api/v1/books/demo/story-workbench")).json()).toMatchObject({
+      storySystem: {
+        latestMigration: {
+          applied: false,
+          chapterCount: 2,
+        },
+      },
+    });
+    await expect(readFile(
+      join(bookDir, ".inoks-story-webnovel", "story-system", "HEAD"),
+      "utf-8",
+    )).rejects.toThrow();
+
+    const unconfirmed = await app.request("/api/v1/books/demo/story-migrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apply: true }),
+    });
+    expect(unconfirmed.status).toBe(400);
+
+    const applied = await app.request("/api/v1/books/demo/story-migrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apply: true, confirmBookId: "demo" }),
+    });
+    expect(applied.status).toBe(200);
+    expect(await applied.json()).toMatchObject({
+      applied: true,
+      chapterCount: 2,
+      backupPath: expect.stringContaining("backups"),
+    });
+
+    const after = await app.request("/api/v1/books/demo/story-workbench");
+    expect(after.status).toBe(200);
+    expect(await after.json()).toMatchObject({
+      storyHead: { chapter: 2 },
+      storyPreflight: { passed: true, errors: [] },
+      storySystem: { acceptedCommitCount: 2 },
     });
   });
 

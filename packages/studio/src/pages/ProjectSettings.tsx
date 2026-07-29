@@ -135,7 +135,8 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
   const { data: modeData, refetch: refetchMode } = useApi<{ mode: "legacy" | "v2" }>("/project/input-governance-mode");
   const { data: detectionData, refetch: refetchDetection } = useApi<{ detection: unknown | null }>("/project/detection");
   const { data: qualityData, refetch: refetchQuality } = useApi<{
-    automationMode: "manual" | "review-first" | "auto-draft" | "auto-publish";
+    automationMode: "manual" | "review-first" | "auto-draft";
+    publicationAutomationEnabled: boolean;
     proseQuality: ProseQualitySettings;
     longFormMemory: LongFormMemorySettings;
   }>("/project/prose-quality");
@@ -148,7 +149,7 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
   const [overrideRows, setOverrideRows] = useState<OverrideRow[]>([]);
   const [notifyChannels, setNotifyChannels] = useState<NotifyChannelDraft[]>([]);
   const [det, setDet] = useState<DetectionDraft>({ ...DEFAULT_DETECTION });
-  const [automationMode, setAutomationMode] = useState<"manual" | "review-first" | "auto-draft" | "auto-publish">("review-first");
+  const [automationMode, setAutomationMode] = useState<"manual" | "review-first" | "auto-draft">("review-first");
   const [proseQuality, setProseQuality] = useState<ProseQualitySettings | null>(null);
   const [longFormMemory, setLongFormMemory] = useState<LongFormMemorySettings | null>(null);
   const [skillDraft, setSkillDraft] = useState<SkillDraft>(() => createEmptySkillDraft());
@@ -333,9 +334,13 @@ export function ProjectSettings({ nav, theme, t }: { nav: Nav; theme: Theme; t: 
                 <option value="manual">{isZh ? "manual：只按人工命令运行" : "manual: explicit commands only"}</option>
                 <option value="review-first">{isZh ? "review-first：自动草稿，提交前人工确认" : "review-first: human approval before commit"}</option>
                 <option value="auto-draft">{isZh ? "auto-draft：自动生成与审查，不自动发布" : "auto-draft: generate and review, never publish"}</option>
-                <option value="auto-publish">{isZh ? "auto-publish：满足全部门槛后允许发布流" : "auto-publish: publishing flow after every gate"}</option>
               </select>
             </label>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              {isZh
+                ? "外部自动发布当前未启用。系统只会生成可审计的发布包，上传与发布结果必须由人工确认或导入外部日志。"
+                : "Automatic external publishing is disabled. The system only creates auditable publication packages; upload and publication results require human confirmation or an imported external log."}
+            </p>
           </SettingsCard>
 
           <SettingsCard
