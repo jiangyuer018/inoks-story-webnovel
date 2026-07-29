@@ -23,6 +23,8 @@ export {
   WritingConfigSchema,
   ProseQualityConfigSchema,
   LongFormMemoryConfigSchema,
+  AutomationModeSchema as WritingAutomationModeSchema,
+  type AutomationMode as WritingAutomationMode,
   InputGovernanceModeSchema,
   ResearchSearchConfigSchema,
 } from "./models/project.js";

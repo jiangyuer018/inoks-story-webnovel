@@ -77,6 +77,35 @@ describe("Story workbench API", () => {
     expect(body.automation.runtime).toMatchObject({ paused: true, pauseReason: "editor review" });
   });
 
+  it("keeps project writing automation modes separate from chat interaction modes", async () => {
+    await writeFile(join(root, "inoks-story-webnovel.json"), "{}\n", "utf-8");
+    const app = createStudioServer({} as never, root);
+    const updated = await app.request("/api/v1/project/prose-quality", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        automationMode: "auto-publish",
+        proseQuality: { enforcement: "balanced" },
+        longFormMemory: { sequenceSize: 10 },
+      }),
+    });
+
+    expect(updated.status).toBe(200);
+    expect(await updated.json()).toMatchObject({
+      automationMode: "auto-publish",
+      proseQuality: { enforcement: "balanced" },
+      longFormMemory: { sequenceSize: 10 },
+    });
+
+    const loaded = await app.request("/api/v1/project/prose-quality");
+    expect(loaded.status).toBe(200);
+    expect(await loaded.json()).toMatchObject({
+      automationMode: "auto-publish",
+      proseQuality: { enforcement: "balanced" },
+      longFormMemory: { sequenceSize: 10 },
+    });
+  });
+
   it("requires an explicit transition before an exported chapter is considered published", async () => {
     const bookDir = join(root, "books", "demo");
     const publishingDir = join(bookDir, ".inoks-story-webnovel", "publishing");

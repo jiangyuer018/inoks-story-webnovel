@@ -46,7 +46,7 @@ import {
   InputGovernanceModeSchema,
   ProseQualityConfigSchema,
   LongFormMemoryConfigSchema,
-  AutomationModeSchema,
+  WritingAutomationModeSchema,
   AgentLLMOverrideSchema,
   ChapterCommitStore,
   latestProjectionFailures,
@@ -4151,7 +4151,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       ? raw.writing as Record<string, unknown>
       : {};
     return c.json({
-      automationMode: AutomationModeSchema.parse(writing.automationMode ?? "review-first"),
+      automationMode: WritingAutomationModeSchema.parse(writing.automationMode ?? "review-first"),
       proseQuality: ProseQualityConfigSchema.parse(writing.proseQuality ?? {}),
       longFormMemory: LongFormMemoryConfigSchema.parse(writing.longFormMemory ?? {}),
     });
@@ -4159,7 +4159,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
 
   app.put("/api/v1/project/prose-quality", async (c) => {
     const body = await c.req.json<{ automationMode?: unknown; proseQuality?: unknown; longFormMemory?: unknown }>();
-    const automationMode = AutomationModeSchema.parse(body.automationMode ?? "review-first");
+    const automationMode = WritingAutomationModeSchema.parse(body.automationMode ?? "review-first");
     const proseQuality = ProseQualityConfigSchema.parse(body.proseQuality ?? {});
     const longFormMemory = LongFormMemoryConfigSchema.parse(body.longFormMemory ?? {});
     const raw = await loadRawConfig(root);
