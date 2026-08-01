@@ -933,6 +933,22 @@ describe("CLI integration", () => {
       const configPath = join(projectDir, "inoks-story-webnovel.json");
       const initialized = await stat(configPath).then(() => true).catch(() => false);
       if (!initialized) run(["init"]);
+      // These cases exercise the legacy context-artifact composer, not formal
+      // chapter production. Declare that compatibility profile explicitly so
+      // the V3 default does not try to call the semantic scene planner through
+      // the intentionally unreachable noop model used by this fixture.
+      const projectConfig = JSON.parse(await readFile(configPath, "utf-8")) as {
+        writing?: Record<string, unknown>;
+      };
+      projectConfig.writing = {
+        ...projectConfig.writing,
+        storySpec: {
+          approvalMode: "automatic",
+          blockOnPlaceholders: false,
+          requireReaderContract: false,
+        },
+      };
+      await writeFile(configPath, JSON.stringify(projectConfig, null, 2), "utf-8");
 
       const bookDir = join(projectDir, "books", "cli-book");
       const storyDir = join(bookDir, "story");
