@@ -21,6 +21,22 @@ import type {
 
 export const STORY_SYSTEM_SCHEMA_VERSION = "inoks-story-story-system/v1";
 
+const LEGACY_EXTENDED_VALIDATION_KEYS = [
+  "storyConvergencePassed",
+  "humanFeelPassed",
+  "emotionPassed",
+  "payoffPassed",
+  "structurePassed",
+  "similarityPassed",
+  "temporalPassed",
+  "humanApprovalPassed",
+] as const;
+
+// Stored v1 commits created before the V3 gates remain readable, but only
+// objects parsed and hash-verified by parseStoredChapterCommit receive this
+// compatibility marker. New candidates still go through the strict schema.
+const verifiedLegacyStoredCommits = new WeakSet<object>();
+
 export function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -251,8 +267,11 @@ export function validateChapterCommit(params: {
   readonly allowRejected?: boolean;
   readonly currentValues?: ReadonlyMap<string, unknown>;
 }): ChapterCommit {
-  const commit = ChapterCommitSchema.parse(params.commit) as ChapterCommit;
-  if (hashCommitPayload(stripCommitHash(commit)) !== commit.commitHash) {
+  const isVerifiedLegacyCommit = verifiedLegacyStoredCommits.has(params.commit);
+  const commit = isVerifiedLegacyCommit
+    ? params.commit
+    : ChapterCommitSchema.parse(params.commit) as ChapterCommit;
+  if (!isVerifiedLegacyCommit && hashCommitPayload(stripCommitHash(commit)) !== commit.commitHash) {
     throw new Error(`Commit ${commit.commitId} hash mismatch`);
   }
   if (sha256(params.content) !== commit.source.contentHash) {
@@ -331,7 +350,7 @@ export class ChapterCommitStore {
     const commits: ChapterCommit[] = [];
     for (const name of names) {
       const raw = await readFile(join(dir, name), "utf-8");
-      commits.push(ChapterCommitSchema.parse(JSON.parse(raw)) as ChapterCommit);
+      commits.push(parseStoredChapterCommit(JSON.parse(raw)));
     }
     if (commits.length <= 1) return commits;
     const byParent = new Map<string | null, ChapterCommit[]>();
@@ -573,6 +592,39 @@ function inferEpistemicStatus(excerpt: string): StoryEvent["epistemicStatus"] {
 
 function hashCommitPayload(value: unknown): string {
   return sha256(canonicalJson(value));
+}
+
+function parseStoredChapterCommit(value: unknown): ChapterCommit {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return ChapterCommitSchema.parse(value) as ChapterCommit;
+  }
+  const raw = value as Record<string, unknown>;
+  const validation = raw.validation;
+  if (!validation || typeof validation !== "object" || Array.isArray(validation)) {
+    return ChapterCommitSchema.parse(value) as ChapterCommit;
+  }
+  const validationRecord = validation as Record<string, unknown>;
+  const missingKeys = LEGACY_EXTENDED_VALIDATION_KEYS.filter((key) => validationRecord[key] === undefined);
+  if (missingKeys.length === 0) return ChapterCommitSchema.parse(value) as ChapterCommit;
+
+  if (raw.schemaVersion !== STORY_SYSTEM_SCHEMA_VERSION) {
+    return ChapterCommitSchema.parse(value) as ChapterCommit;
+  }
+  const { commitHash, ...withoutHash } = raw;
+  if (typeof commitHash !== "string" || hashCommitPayload(withoutHash) !== commitHash) {
+    throw new Error(`Legacy commit ${String(raw.commitId ?? "unknown")} hash mismatch`);
+  }
+
+  const legacyAccepted = raw.status === "accepted";
+  const normalized = ChapterCommitSchema.parse({
+    ...raw,
+    validation: {
+      ...validationRecord,
+      ...Object.fromEntries(missingKeys.map((key) => [key, legacyAccepted])),
+    },
+  }) as ChapterCommit;
+  verifiedLegacyStoredCommits.add(normalized);
+  return normalized;
 }
 
 function stripCommitHash(commit: ChapterCommit): Omit<ChapterCommit, "commitHash"> {

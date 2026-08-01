@@ -8,6 +8,7 @@ import {
   ProjectionManager,
   approveChapterCommit,
   buildChapterCommit,
+  canonicalJson,
   commitChapterTransaction,
   deterministicCommitId,
   deterministicEventId,
@@ -55,6 +56,38 @@ describe("ChapterCommit", () => {
     expect(commit.validation.humanFeelPassed).toBe(false);
     expect(commit.validation.temporalPassed).toBe(false);
     expect(commit.validation.humanApprovalPassed).toBe(false);
+  });
+
+  it("reads hash-valid legacy commits without weakening strict validation for new commits", async () => {
+    const root = await makeBookDir();
+    const commit = buildCommit(root);
+    await commitChapterTransaction({
+      bookDir: root,
+      commit,
+      chapterDocument: "# 第1章 账本\n\n正文",
+    });
+    const store = new ChapterCommitStore(root);
+    const path = store.commitPath(1);
+    const legacy = JSON.parse(await readFile(path, "utf-8")) as Record<string, any>;
+    for (const key of [
+      "storyConvergencePassed",
+      "humanFeelPassed",
+      "emotionPassed",
+      "payoffPassed",
+      "structurePassed",
+      "similarityPassed",
+      "temporalPassed",
+      "humanApprovalPassed",
+    ]) delete legacy.validation[key];
+    const { commitHash: _oldHash, ...withoutHash } = legacy;
+    legacy.commitHash = sha256(canonicalJson(withoutHash));
+    await writeFile(path, `${JSON.stringify(legacy, null, 2)}\n`, "utf-8");
+
+    const [loaded] = await store.listCommits();
+    expect(loaded?.validation.humanApprovalPassed).toBe(true);
+    await expect(store.verifyChain()).resolves.toBeUndefined();
+
+    expect(buildCommit(root, { extendedValidation: {} }).status).toBe("rejected");
   });
 
   it("stores a reviewed draft outside chapters and approves only the same hash", async () => {
