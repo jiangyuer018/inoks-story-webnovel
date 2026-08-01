@@ -78,7 +78,6 @@ import {
   DEFAULT_LONG_FORM_MEMORY_CONFIG,
   ChapterApprovalStore,
   ChapterCommitStore,
-  approveChapterCommit,
   buildChapterCommit,
   commitChapterTransaction,
   createDefaultProjectionManager,
@@ -98,23 +97,14 @@ import {
   StorySpecStore,
   type CompiledWritingContract,
 } from "../story-spec/index.js";
-import {
-  DynamicPlotStateStore,
-  EventCausalGraphStore,
-  auditEmotionTrajectory,
-  createDefaultEmotionTrajectory,
-  detectMissingNarrativeLogic,
-  evaluateOutlineControl,
-  extractNarrativeLogicNodes,
-} from "../narrative-research/index.js";
 import { auditHumanFeel, HumanFeelDecisionStore, saveHumanFeelReport } from "../human-feel/index.js";
-import {
-  PayoffLedgerStore,
-  ReaderContractStore,
-  auditPayoff,
-  savePayoffAudit,
-} from "../story-craft/index.js";
-import { BenchmarkStore } from "../benchmark/index.js";
+import { approvePendingChapter } from "../orchestration/approval-orchestrator.js";
+import { prepareChapterPlanningResearch } from "../orchestration/planning-orchestrator.js";
+import { runDeterministicChapterReview } from "../orchestration/review-orchestrator.js";
+import type {
+  ChapterPipelineResult,
+  TokenUsageSummary,
+} from "../orchestration/types.js";
 import {
   SceneRealizationPlanner,
   SemanticSceneReviewerAgent,
@@ -367,29 +357,7 @@ export interface PipelineConfig {
   readonly onContextCompression?: ContextCompressionCallback;
 }
 
-export interface TokenUsageSummary {
-  readonly promptTokens: number;
-  readonly completionTokens: number;
-  readonly totalTokens: number;
-}
-
-export interface ChapterPipelineResult {
-  readonly chapterNumber: number;
-  readonly title: string;
-  readonly wordCount: number;
-  readonly auditResult: AuditResult;
-  readonly revised: boolean;
-  readonly status:
-    | "awaiting-human-approval"
-    | "committed"
-    | "projection-failed"
-    | "ready-for-review"
-    | "audit-failed"
-    | "state-degraded";
-  readonly lengthWarnings?: ReadonlyArray<string>;
-  readonly lengthTelemetry?: LengthTelemetry;
-  readonly tokenUsage?: TokenUsageSummary;
-}
+export type { ChapterPipelineResult, TokenUsageSummary } from "../orchestration/types.js";
 
 // Atomic operation results
 export interface DraftResult {
@@ -2055,138 +2023,24 @@ export class PipelineRunner {
     try {
       const book = await this.state.loadBookConfig(bookId);
       const bookDir = this.state.bookDir(bookId);
-      const approvalStore = new ChapterApprovalStore(bookDir);
-      const pending = await approvalStore.load(chapterNumber);
-      if (!pending) {
-        throw new Error(
-          `Pending chapter ${chapterNumber} was not found at ${approvalStore.recordPath(chapterNumber)}`,
-        );
-      }
-      if (pending.record.lifecycleStatus !== "awaiting-human-approval") {
-        throw new Error(
-          `Chapter ${chapterNumber} is ${pending.record.lifecycleStatus}; it must be reviewed again before approval`,
-        );
-      }
-      const approved = await approvalStore.markApproved(
-        chapterNumber,
-        pending.record.contentHash,
-      );
-      await approvalStore.markLifecycle(chapterNumber, "commit-pending");
-      const commit = approveChapterCommit({
-        commit: approved.record.commitDraft,
-        approvedContentHash: approved.record.contentHash,
-        approvedAt: approved.record.approvedAt,
-      });
       const language = await this.resolveBookLanguage(book);
-      const heading = language === "en"
-        ? `# Chapter ${chapterNumber}: ${approved.record.title}`
-        : `# 第${chapterNumber}章 ${approved.record.title}`;
-      const chapterDocument = `${heading}\n\n${approved.content}`;
       const longFormMemoryConfig = this.resolveLongFormMemoryConfig(book);
-      let transaction: Awaited<ReturnType<typeof commitChapterTransaction>> | undefined;
-      try {
-        await persistChapterArtifacts({
-          chapterNumber,
-          chapterTitle: approved.record.title,
-          status: "committed",
-          auditResult: approved.record.auditResult,
-          finalWordCount: approved.record.finalWordCount,
-          lengthWarnings: approved.record.lengthWarnings,
-          lengthTelemetry: approved.record.lengthTelemetry,
-          degradedIssues: approved.record.degradedIssues,
-          tokenUsage: approved.record.tokenUsage,
-          proseQuality: approved.record.proseQuality,
-          approval: {
-            contentHash: approved.record.contentHash,
-            approvedContentHash: approved.record.contentHash,
-            approvedAt: approved.record.approvedAt,
-          },
-          loadChapterIndex: () => this.state.loadChapterIndex(bookId),
-          saveChapter: async () => {
-            transaction = await commitChapterTransaction({
-              bookDir,
-              commit,
-              chapterDocument,
-            });
-          },
-          saveTruthFiles: async () => {
-            await markTransactionPhase(transaction?.manifestPath ?? "", "projecting");
-            const projectionResults = await createDefaultProjectionManager(bookDir, {
-              sequenceSize: longFormMemoryConfig.sequenceSize,
-              generateSequenceSummaries: longFormMemoryConfig.generateSequenceSummaries,
-              generateArcSummaries: longFormMemoryConfig.generateArcSummaries,
-            }).project(commit);
-            const failures = projectionResults.filter((result) => result.status === "failed");
-            if (failures.length > 0 && longFormMemoryConfig.blockOnProjectionFailure) {
-              throw new Error(
-                `Chapter committed but required projection failed: ${failures
-                  .map((item) => `${item.name}: ${item.error ?? "failed"}`)
-                  .join("; ")}`,
-              );
-            }
-            await markTransactionPhase(transaction?.manifestPath ?? "", "complete");
-          },
-          saveChapterIndex: (index) => this.state.saveChapterIndex(bookId, index),
-          markBookActiveIfNeeded: () => this.markBookActiveIfNeeded(bookId),
-          persistAuditDriftGuidance: (issues) => this.persistAuditDriftGuidance({
-            bookDir,
-            chapterNumber,
-            issues,
-            language,
-          }).catch(() => undefined),
-          snapshotState: () => this.state.snapshotState(bookId, chapterNumber),
-          syncCurrentStateFactHistory: async () => undefined,
-          logSnapshotStage: () =>
-            this.logStage(language, { zh: "更新章节索引与快照", en: "updating chapter index and snapshots" }),
-        });
-      } catch (error) {
-        if (transaction) {
-          await approvalStore.markLifecycle(chapterNumber, "projection-failed");
-          const index = await this.state.loadChapterIndex(bookId);
-          const existing = index.find((chapter) => chapter.number === chapterNumber);
-          const now = new Date().toISOString();
-          const failedMeta: ChapterMeta = {
-            number: chapterNumber,
-            title: approved.record.title,
-            status: "projection-failed",
-            wordCount: approved.record.finalWordCount,
-            createdAt: existing?.createdAt ?? approved.record.createdAt,
-            updatedAt: now,
-            auditIssues: approved.record.auditResult.issues
-              .map((issue) => `[${issue.severity}] ${issue.description}`),
-            lengthWarnings: [...approved.record.lengthWarnings],
-            lengthTelemetry: approved.record.lengthTelemetry,
-            tokenUsage: approved.record.tokenUsage,
-            proseQuality: approved.record.proseQuality,
-            approval: {
-              contentHash: approved.record.contentHash,
-              approvedContentHash: approved.record.contentHash,
-              approvedAt: approved.record.approvedAt,
-            },
-          };
-          await this.state.saveChapterIndex(
-            bookId,
-            existing
-              ? index.map((chapter) => chapter.number === chapterNumber ? failedMeta : chapter)
-              : [...index, failedMeta],
-          );
-        } else {
-          await approvalStore.markLifecycle(chapterNumber, "approved");
-        }
-        throw error;
-      }
-      await approvalStore.markLifecycle(chapterNumber, "committed");
-      return {
+      return await approvePendingChapter({
+        state: this.state,
+        bookId,
         chapterNumber,
-        title: approved.record.title,
-        wordCount: approved.record.finalWordCount,
-        auditResult: approved.record.auditResult,
-        revised: approved.record.proseQuality?.repaired ?? false,
-        status: "committed",
-        lengthWarnings: approved.record.lengthWarnings,
-        lengthTelemetry: approved.record.lengthTelemetry,
-        tokenUsage: approved.record.tokenUsage,
-      };
+        language,
+        longFormMemory: longFormMemoryConfig,
+        markBookActiveIfNeeded: () => this.markBookActiveIfNeeded(bookId),
+        persistAuditDriftGuidance: (issues) => this.persistAuditDriftGuidance({
+          bookDir,
+          chapterNumber,
+          issues,
+          language,
+        }),
+        logSnapshotStage: () =>
+          this.logStage(language, { zh: "更新章节索引与快照", en: "updating chapter index and snapshots" }),
+      });
     } finally {
       await releaseLock();
     }
@@ -2554,56 +2408,21 @@ export class PipelineRunner {
         zh: "执行 Story Convergence",
         en: "running story convergence",
       });
-      const outlineControl = evaluateOutlineControl({
-        content: finalContent,
-        beats: compiledWritingContract.activeBeatContracts,
-        allowedStateChanges: compiledWritingContract.chapterSpec.requiredStateChanges,
-      });
-      const emotionAudit = compiledWritingContract.emotionalTrajectory
-        ? auditEmotionTrajectory(finalContent, compiledWritingContract.emotionalTrajectory)
-        : undefined;
-      const missingLogicIssues = detectMissingNarrativeLogic(
-        extractNarrativeLogicNodes(finalContent),
-      );
-      const payoffAudit = auditPayoff({
-        content: finalContent,
-        chapter: chapterNumber,
-        targets: compiledWritingContract.payoffTargets,
-      });
-      payoffPassed = payoffAudit.passed;
-      payoffReportPath = await savePayoffAudit({
+      const deterministicReview = await runDeterministicChapterReview({
         bookDir,
-        chapter: chapterNumber,
-        audit: payoffAudit,
-      });
-      const benchmarkStore = new BenchmarkStore(bookDir);
-      const benchmarkScenes = compiledWritingContract.chapterSpec.sceneRealization?.scenes ?? [];
-      const similarityReport = await benchmarkStore.analyzeSimilarity({
-        text: finalContent,
-        eventSequence: compiledWritingContract.chapterSpec.plannedEvents,
-        entities: [...new Set([
-          compiledWritingContract.chapterSpec.pov,
-          ...benchmarkScenes.flatMap((scene) => [
-            scene.plan.povCharacterId,
-            ...scene.plan.cast,
-          ]),
-        ].filter(Boolean))],
-        relationships: [...new Set(benchmarkScenes.flatMap((scene) => [
-          ...scene.plan.entryState.relationships,
-          ...scene.plan.exitState.relationships,
-          ...scene.characterAgendas.flatMap((agenda) => Object.keys(agenda.beliefAboutOthers)),
-        ]).filter(Boolean))],
-        sceneFunctions: benchmarkScenes.flatMap((scene) => scene.plan.narrativeFunctions),
-        beatSequence: [
-          ...compiledWritingContract.activeBeatContracts.map((beat) => beat.function),
-          ...benchmarkScenes.flatMap((scene) => scene.plan.beatIds),
-        ],
-      });
-      similarityPassed = similarityReport.verdict !== "block";
-      similarityReportPath = await benchmarkStore.saveSimilarityReport(
         chapterNumber,
-        similarityReport,
-      );
+        content: finalContent,
+        contract: compiledWritingContract,
+      });
+      const {
+        outlineControl,
+        emotionAudit,
+        missingLogicIssues,
+      } = deterministicReview;
+      payoffPassed = deterministicReview.payoffAudit.passed;
+      payoffReportPath = deterministicReview.payoffReportPath;
+      similarityPassed = deterministicReview.similarityReport.verdict !== "block";
+      similarityReportPath = deterministicReview.similarityReportPath;
       if (compiledWritingContract.chapterSpec.sceneRealization) {
         const sceneSemantic = await this.finalizeSceneSemanticReview({
           bookId,
@@ -2699,7 +2518,7 @@ export class PipelineRunner {
             gate: "payoff",
             passed: payoffPassed,
             blocking: true,
-            details: payoffAudit.issues
+            details: deterministicReview.payoffAudit.issues
               .filter((issue) => issue.severity === "blocking")
               .map((issue) => issue.message),
           },
@@ -2707,7 +2526,7 @@ export class PipelineRunner {
             gate: "benchmark-similarity",
             passed: similarityPassed,
             blocking: true,
-            details: similarityReport.flaggedPassages.map((flag) =>
+            details: deterministicReview.similarityReport.flaggedPassages.map((flag) =>
               `${flag.reason}: ${flag.candidateExcerpt}`),
           },
         ],
@@ -4637,79 +4456,23 @@ ${matrix}`,
       const store = new StorySpecStore(params.bookDir);
       throw new StorySpecApprovalRequiredError(spec, store.specPath(params.chapterNumber));
     }
-    const benchmarkStore = new BenchmarkStore(params.bookDir);
-    const eventGraphStore = new EventCausalGraphStore(params.bookDir);
-    const [dynamicPlotState, readerContract, payoffTargets, benchmarkGuidance, narrativeDeliveryProfiles] = await Promise.all([
-      new DynamicPlotStateStore(params.bookDir).load(),
-      new ReaderContractStore(params.bookDir).ensure(),
-      new PayoffLedgerStore(params.bookDir).dueAt(params.chapterNumber),
-      benchmarkStore.approvedMechanisms(),
-      benchmarkStore.approvedDeliveryProfiles(),
-    ]);
-    const realizedScenes = spec.sceneRealization?.scenes ?? [];
-    const characterIds = [...new Set([
-      spec.pov,
-      ...realizedScenes.flatMap((scene) => [scene.plan.povCharacterId, ...scene.plan.cast]),
-      ...dynamicPlotState.currentGoals.map((goal) => goal.characterId),
-    ].filter(Boolean))];
-    const relevantEventGraph = await eventGraphStore.relevant({
-      characterIds,
-      locationIds: [...new Set(realizedScenes.map((scene) => scene.plan.location).filter(Boolean))],
-      entityIds: [...new Set([
-        ...dynamicPlotState.availableResources.flatMap((resource) => [resource.id, resource.owner]),
-        ...dynamicPlotState.immediateThreats.map((threat) => threat.target),
-      ].filter(Boolean))],
-      hookIds: [...new Set([
-        ...spec.payoffTargets,
-        ...spec.readerExpectation,
-        ...dynamicPlotState.activeReaderExpectations,
-      ].filter(Boolean))],
-      plannedEventIds: [...new Set([
-        ...spec.beats.map((beat) => beat.id),
-        ...realizedScenes.flatMap((scene) => [scene.plan.id, ...scene.plan.beatIds]),
-      ])],
-      semanticTerms: [
-        spec.chapterGoal,
-        ...spec.plannedEvents,
-        ...realizedScenes.flatMap((scene) => [
-          scene.plan.immediateGoal,
-          scene.plan.oppositionGoal,
-          scene.plan.turningPoint,
-          scene.plan.irreversibleChange,
-        ]),
-      ],
-      beforeChapter: params.chapterNumber,
-      maxEvents: 20,
-    });
-    const characterStates = realizedScenes.flatMap((scene) => scene.characterAgendas.map((agenda) => ({
-      characterId: agenda.characterId,
-      desire: agenda.wantsNow,
-      fear: agenda.fearsNow,
-      belief: Object.entries(agenda.beliefAboutOthers).map(([id, belief]) => `${id}：${belief}`).join("；") || agenda.tactic,
-      selfImage: agenda.successCondition,
-      relationshipBeliefs: agenda.beliefAboutOthers,
-      emotionalPressure: [agenda.fearsNow, ...agenda.cannotSayDirectly],
-      copingStrategy: agenda.tactic,
-      contradiction: [agenda.wantsNow, ...agenda.hides].join("；"),
-    })));
-    const emotionalTrajectory = createDefaultEmotionTrajectory({
-      id: spec.emotionalTrajectoryId,
-      ownerCharacterId: spec.pov || undefined,
-      goal: spec.chapterGoal,
-      payoffTargets: spec.payoffTargets,
+    const research = await prepareChapterPlanningResearch({
+      bookDir: params.bookDir,
+      chapterNumber: params.chapterNumber,
+      spec,
     });
     return compileWritingContract({
       bookDir: params.bookDir,
       platform: params.book.platform,
       chapterSpec: spec,
-      readerContract,
-      payoffTargets,
-      benchmarkGuidance,
-      narrativeDeliveryProfiles,
-      emotionalTrajectory,
-      dynamicPlotState,
-      characterStates,
-      relevantEventGraph,
+      readerContract: research.readerContract,
+      payoffTargets: research.payoffTargets,
+      benchmarkGuidance: research.benchmarkGuidance,
+      narrativeDeliveryProfiles: research.narrativeDeliveryProfiles,
+      emotionalTrajectory: research.emotionalTrajectory,
+      dynamicPlotState: research.dynamicPlotState,
+      characterStates: research.characterStates,
+      relevantEventGraph: research.relevantEventGraph,
       requireReaderContract: this.config.requireReaderContract ?? false,
       blockOnPlaceholders: this.config.blockOnStorySpecPlaceholders ?? false,
     });

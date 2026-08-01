@@ -577,6 +577,9 @@ export { analyzeHookHealth } from "./utils/hook-health.js";
 
 // Pipeline
 export { PipelineRunner, type PipelineConfig, type ChapterPipelineResult, type DraftResult, type PlanChapterResult, type ComposeChapterResult, type ReviseResult, type TruthFiles, type BookStatusInfo, type ImportChaptersInput, type ImportChaptersResult, type TokenUsageSummary } from "./pipeline/runner.js";
+export { approvePendingChapter, type ApprovePendingChapterParams } from "./orchestration/approval-orchestrator.js";
+export { prepareChapterPlanningResearch, type ChapterPlanningResearchContext } from "./orchestration/planning-orchestrator.js";
+export { runDeterministicChapterReview, type DeterministicChapterReviewResult } from "./orchestration/review-orchestrator.js";
 export * from "./prose-quality/index.js";
 export * from "./story-system/index.js";
 export * from "./story-spec/index.js";
