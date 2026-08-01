@@ -198,6 +198,25 @@ export function renderCompiledWritingContract(contract: CompiledWritingContract)
       `- unresolved decisions: ${contract.dynamicPlotState.unresolvedDecisions.map((item) => item.decision).join("；") || "无"}`,
       `- immediate threats: ${contract.dynamicPlotState.immediateThreats.map((item) => item.description).join("；") || "无"}`,
     ] : []),
+    ...(contract.characterStates.length > 0 ? [
+      "",
+      "## Character Psychology State（行动必须由此状态或明确新刺激推导）",
+      ...contract.characterStates.map((state) => [
+        `- ${state.characterId}: 欲望=${state.desire}；恐惧=${state.fear}；信念=${state.belief}`,
+        `  自我定位=${state.selfImage}；策略=${state.copingStrategy}；矛盾=${state.contradiction}`,
+        `  对他人判断=${Object.entries(state.relationshipBeliefs).map(([id, belief]) => `${id}:${belief}`).join("、") || "无"}`,
+        `  当前压力=${state.emotionalPressure.join("、") || "无"}`,
+      ].join("\n")),
+    ] : []),
+    ...(contract.relevantEventGraph.length > 0 ? [
+      "",
+      "## Causally Relevant Canon History（按人物、地点、实体、伏笔和计划事件检索；不是最近事件截断）",
+      ...contract.relevantEventGraph.map((event) => [
+        `- [${event.id}] 第${event.time.chapter}章 ${event.subject.name} ${event.predicate}${event.object ? ` ${event.object.name}` : ""}`,
+        `  目标=${event.actorGoal ?? "未记录"}；地点=${event.location?.name ?? "未记录"}；确定性=${event.certainty}`,
+        `  原因=${[...event.causeEventIds, ...event.prerequisiteEventIds].join("、") || "无"}；来源Commit=${event.provenance.sourceCommitId}`,
+      ].join("\n")),
+    ] : []),
     "",
     "只在 Open Space 内自由发挥；不得用章末总结冒充 Beat 兑现。",
   ].join("\n");

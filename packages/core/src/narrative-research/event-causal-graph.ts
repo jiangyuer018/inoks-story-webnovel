@@ -9,6 +9,17 @@ export interface CausalGraphValidation {
   readonly cycles: ReadonlyArray<ReadonlyArray<string>>;
 }
 
+export interface RelevantHistoryQuery {
+  readonly characterIds: ReadonlyArray<string>;
+  readonly locationIds: ReadonlyArray<string>;
+  readonly entityIds: ReadonlyArray<string>;
+  readonly hookIds: ReadonlyArray<string>;
+  readonly plannedEventIds: ReadonlyArray<string>;
+  readonly semanticTerms?: ReadonlyArray<string>;
+  readonly beforeChapter?: number;
+  readonly maxEvents: number;
+}
+
 export class EventCausalGraphStore {
   readonly path: string;
 
@@ -44,20 +55,91 @@ export class EventCausalGraphStore {
     return { added: commit.events.length, total: events.length, validation };
   }
 
-  async relevant(eventIds: ReadonlyArray<string>, limit = 20): Promise<ReadonlyArray<CanonicalEvent>> {
+  async relevant(eventIds: ReadonlyArray<string>, limit?: number): Promise<ReadonlyArray<CanonicalEvent>>;
+  async relevant(query: RelevantHistoryQuery): Promise<ReadonlyArray<CanonicalEvent>>;
+  async relevant(
+    queryOrEventIds: ReadonlyArray<string> | RelevantHistoryQuery,
+    legacyLimit = 20,
+  ): Promise<ReadonlyArray<CanonicalEvent>> {
     const events = await this.load();
+    if (!Array.isArray(queryOrEventIds)) {
+      return selectRelevantHistory(events, queryOrEventIds as RelevantHistoryQuery);
+    }
     const byId = new Map(events.map((event) => [event.id, event]));
     const selected = new Map<string, CanonicalEvent>();
     const visit = (id: string): void => {
-      if (selected.size >= limit || selected.has(id)) return;
+      if (selected.size >= legacyLimit || selected.has(id)) return;
       const event = byId.get(id);
       if (!event) return;
       selected.set(id, event);
       for (const dependency of [...event.causeEventIds, ...event.prerequisiteEventIds]) visit(dependency);
     };
-    for (const id of eventIds) visit(id);
+    for (const id of queryOrEventIds as ReadonlyArray<string>) visit(id);
     return [...selected.values()];
   }
+}
+
+export function selectRelevantHistory(
+  sourceEvents: ReadonlyArray<CanonicalEvent>,
+  query: RelevantHistoryQuery,
+): ReadonlyArray<CanonicalEvent> {
+  const limit = Math.max(0, query.maxEvents);
+  if (limit === 0) return [];
+  const events = sourceEvents.filter((event) => (
+    query.beforeChapter === undefined || event.time.chapter < query.beforeChapter
+  ));
+  const byId = new Map(events.map((event) => [event.id, event]));
+  const planned = normalizedSet(query.plannedEventIds);
+  const characters = normalizedSet(query.characterIds);
+  const locations = normalizedSet(query.locationIds);
+  const entities = normalizedSet(query.entityIds);
+  const hooks = normalizedSet(query.hookIds);
+  const semanticTerms = [...normalizedSet(query.semanticTerms ?? [])].filter((term) => term.length >= 2);
+  const score = (event: CanonicalEvent): number => {
+    let value = planned.has(normalizeTerm(event.id)) ? 1_000 : 0;
+    const subject = normalizeTerm(event.subject.id || event.subject.name);
+    const object = normalizeTerm(event.object?.id || event.object?.name || "");
+    const location = normalizeTerm(event.location?.id || event.location?.name || "");
+    if (characters.has(subject) || characters.has(object)) value += 120;
+    if (entities.has(subject) || entities.has(object)) value += 90;
+    if (locations.has(location)) value += 80;
+    const searchable = normalizeTerm([
+      event.id,
+      event.subject.id,
+      event.subject.name,
+      event.object?.id,
+      event.object?.name,
+      event.location?.id,
+      event.location?.name,
+      event.predicate,
+      event.actorGoal,
+      ...event.enables,
+      ...event.blocks,
+    ].filter(Boolean).join(" "));
+    for (const hook of hooks) if (searchable.includes(hook)) value += 70;
+    for (const term of semanticTerms) if (searchable.includes(term)) value += 12;
+    return value;
+  };
+  const ranked = events
+    .map((event) => ({ event, score: score(event) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score
+      || right.event.time.chapter - left.event.time.chapter
+      || left.event.id.localeCompare(right.event.id));
+  const selected = new Map<string, CanonicalEvent>();
+  const visit = (id: string): void => {
+    if (selected.size >= limit || selected.has(id)) return;
+    const event = byId.get(id);
+    if (!event) return;
+    selected.set(id, event);
+    for (const relatedId of [
+      ...event.causeEventIds,
+      ...event.prerequisiteEventIds,
+      ...event.consequenceEventIds,
+    ]) visit(relatedId);
+  };
+  for (const item of ranked) visit(item.event.id);
+  return [...selected.values()].sort(compareEvents);
 }
 
 export function normalizeCanonicalEvent(commit: ChapterCommit, event: StoryEvent): CanonicalEvent {
@@ -161,6 +243,14 @@ function compareEvents(left: CanonicalEvent, right: CanonicalEvent): number {
 
 function unique(values: ReadonlyArray<string>): string[] {
   return [...new Set(values)];
+}
+
+function normalizeTerm(value: string): string {
+  return value.trim().toLocaleLowerCase().replace(/\s+/g, "");
+}
+
+function normalizedSet(values: ReadonlyArray<string>): Set<string> {
+  return new Set(values.map(normalizeTerm).filter(Boolean));
 }
 
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {

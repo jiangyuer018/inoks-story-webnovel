@@ -6,6 +6,7 @@ import type {
 } from "../narrative-research/types.js";
 import type { PayoffEntry, ReaderContract } from "../story-craft/index.js";
 import type { AbstractNarrativeMechanism } from "../benchmark/types.js";
+import type { SceneRealizationBundle } from "../scene-realization/types.js";
 
 export type StoryConstraintStrength = "hard" | "soft" | "open";
 export type StorySpecStatus =
@@ -129,6 +130,7 @@ export interface ChapterSpec {
   readonly requiredStateChanges: ReadonlyArray<string>;
   readonly acceptanceCriteria: ReadonlyArray<AcceptanceCriterion>;
   readonly sceneContracts: ReadonlyArray<SceneContract>;
+  readonly sceneRealization?: SceneRealizationBundle;
   readonly beats: ReadonlyArray<ControlledNarrativeBeat>;
   readonly sourceIntentHash: string;
   readonly createdAt: string;

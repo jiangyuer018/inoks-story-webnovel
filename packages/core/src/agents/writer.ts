@@ -37,7 +37,13 @@ import {
   mergeTableMarkdownByKey,
 } from "../utils/governed-working-set.js";
 import { extractPOVFromOutline, filterMatrixByPOV, filterHooksByPOV } from "../utils/pov-filter.js";
-import { parseCreativeOutput } from "./writer-parser.js";
+import { parseCreativeOutput, type CreativeOutput } from "./writer-parser.js";
+import type { RealizedScene, SceneRealizationBundle, SemanticSceneReview } from "../scene-realization/types.js";
+import {
+  HumanSceneRepairAgent,
+  SceneSemanticGateError,
+  SemanticSceneReviewerAgent,
+} from "../scene-realization/index.js";
 import { buildRuntimeStateArtifacts, type RuntimeStateArtifacts } from "../state/runtime-state-store.js";
 import type { RuntimeStateSnapshot } from "../state/state-reducer.js";
 import {
@@ -91,6 +97,112 @@ export interface WriteChapterInput {
   readonly temperatureOverride?: number;
   /** Canonical pipeline defers all fact extraction until the final prose is accepted. */
   readonly deferSettlement?: boolean;
+}
+
+function cleanSceneProse(raw: string): string {
+  let text = raw.trim()
+    .replace(/^```(?:markdown|md|text)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+  const tagged = text.match(/===\s*CHAPTER_CONTENT\s*===\s*([\s\S]*?)(?====\s*[A-Z_]+\s*===|$)/);
+  if (tagged?.[1]) text = tagged[1].trim();
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(?:SCENE|场景)\s*(?:ID)?\s*[：:]/i.test(line))
+    .join("\n")
+    .trim();
+}
+
+function addTokenUsage(
+  target: { promptTokens: number; completionTokens: number; totalTokens: number },
+  usage: TokenUsage,
+): void {
+  target.promptTokens += usage.promptTokens;
+  target.completionTokens += usage.completionTokens;
+  target.totalTokens += usage.totalTokens;
+}
+
+function normalizeSemanticReview(scene: RealizedScene, review: SemanticSceneReview): SemanticSceneReview {
+  const hasHardFailure = !review.entryExitStateMatch
+    || review.unintendedFacts.some((issue) => issue.severity === "blocking")
+    || review.dialogueTurns.some((turn) => turn.violatesKnowledgeBoundary);
+  if (review.verdict === "block" || hasHardFailure) {
+    return review.verdict === "block" ? review : { ...review, verdict: "block" };
+  }
+
+  const informationById = new Map(review.informationFulfillment.map((item) => [item.informationUnitId, item]));
+  const interactionByOrder = new Map(review.interactionFulfillment.map((item) => [item.turnOrder, item]));
+  const needsRepair = review.verdict === "repair"
+    || review.missingDramatization.length > 0
+    || review.narrationUnits.some((unit) => !unit.necessary || !unit.permissionMatched)
+    || review.dialogueTurns.some((turn) => (
+      !turn.respondsToPreviousTurn
+      || !turn.changesInteraction
+      || turn.informationDump
+      || turn.speakerGoal === null
+    ))
+    || review.actions.some((action) => (
+      action.intention === null
+      || action.observableEffect === null
+      || action.removableWithoutLoss
+    ))
+    || review.thoughts.some((thought) => (
+      thought.observation === null
+      || thought.interpretation === null
+      || (thought.beliefChange === null && thought.strategyChange === null && thought.decisionChange === null)
+    ))
+    || review.environmentDetails.some((detail) => detail.removableWithoutLoss)
+    || scene.informationUnits.some((unit) => {
+      const fulfillment = informationById.get(unit.id);
+      return !fulfillment?.delivered || !fulfillment.consequenceVisible || fulfillment.carrierUsed.length === 0;
+    })
+    || scene.interactionTurns.some((turn) => {
+      const fulfillment = interactionByOrder.get(turn.order);
+      return !fulfillment?.fulfilled || (fulfillment.missingParts.length > 0);
+    });
+  return needsRepair && review.verdict === "pass" ? { ...review, verdict: "repair" } : review;
+}
+
+function buildSceneImmutableFacts(scene: RealizedScene): string[] {
+  const facts = [
+    ...scene.informationUnits.map((unit) => unit.fact),
+    scene.plan.turningPoint,
+    scene.plan.decisionPoint,
+    scene.plan.irreversibleChange,
+    ...scene.plan.entryState.goals,
+    ...scene.plan.entryState.relationships,
+    ...scene.plan.entryState.risks,
+    ...scene.plan.entryState.resources,
+    ...scene.plan.entryState.information,
+    ...scene.plan.exitState.goals,
+    ...scene.plan.exitState.relationships,
+    ...scene.plan.exitState.risks,
+    ...scene.plan.exitState.resources,
+    ...scene.plan.exitState.information,
+  ].map((item) => item.trim()).filter(Boolean);
+  return [...new Set(facts)];
+}
+
+function buildSceneAllowedChanges(review: SemanticSceneReview): string[] {
+  const changes = [
+    ...review.missingDramatization.map((issue) => issue.message),
+    ...review.narrationUnits
+      .filter((unit) => !unit.necessary || !unit.permissionMatched)
+      .map((unit) => `重构无许可或无必要的旁白：${unit.excerpt}`),
+    ...review.dialogueTurns
+      .filter((turn) => !turn.respondsToPreviousTurn || !turn.changesInteraction || turn.informationDump)
+      .map((turn) => `重构未形成刺激—反应的对白：${turn.excerpt}`),
+    ...review.actions
+      .filter((action) => action.removableWithoutLoss || action.intention === null || action.observableEffect === null)
+      .map((action) => `删除或赋予行动意图与后果：${action.excerpt}`),
+    ...review.environmentDetails
+      .filter((detail) => detail.removableWithoutLoss)
+      .map((detail) => `删除或让环境参与行动：${detail.excerpt}`),
+    ...review.interactionFulfillment
+      .filter((turn) => !turn.fulfilled || turn.missingParts.length > 0)
+      .map((turn) => `补全互动第 ${turn.turnOrder} 轮：${turn.missingParts.join("、")}`),
+  ].filter(Boolean);
+  return changes.length > 0 ? [...new Set(changes)] : ["按语义审查结论完成最小必要场景重构"];
 }
 
 export interface SettleChapterStateInput {
@@ -296,16 +408,30 @@ export class WriterAgent extends BaseAgent {
       en: `Phase 1: creative writing for chapter ${chapterNumber}`,
     });
 
-    const creativeResponse = await this.chat(
-      [
-        { role: "system", content: creativeSystemPrompt },
-        { role: "user", content: creativeUserPrompt },
-      ],
-      { temperature: creativeTemperature },
-    );
-    const creativeUsage = creativeResponse.usage;
+    const realizedWriting = input.compiledWritingContract?.chapterSpec.sceneRealization
+      ? await this.writeRealizedScenes({
+          realization: input.compiledWritingContract.chapterSpec.sceneRealization,
+          baseSystemPrompt: creativeSystemPrompt,
+          baseUserPrompt: creativeUserPrompt,
+          language: resolvedLanguage,
+          chapterNumber,
+          temperature: creativeTemperature,
+          countingMode: resolvedLengthSpec.countingMode,
+        })
+      : null;
+    const creativeResponse = realizedWriting
+      ? null
+      : await this.chat(
+          [
+            { role: "system", content: creativeSystemPrompt },
+            { role: "user", content: creativeUserPrompt },
+          ],
+          { temperature: creativeTemperature },
+        );
+    const creativeUsage = realizedWriting?.usage ?? creativeResponse!.usage;
 
-    const creative = parseCreativeOutput(chapterNumber, creativeResponse.content, resolvedLengthSpec.countingMode);
+    const creative = realizedWriting?.creative
+      ?? parseCreativeOutput(chapterNumber, creativeResponse!.content, resolvedLengthSpec.countingMode);
     const titleReview = await this.reviewChapterTitle({
       title: creative.title,
       content: creative.content,
@@ -492,6 +618,133 @@ export class WriterAgent extends BaseAgent {
       postWriteWarnings,
       hookHealthIssues,
       tokenUsage,
+    };
+  }
+
+  private async writeRealizedScenes(input: {
+    readonly realization: SceneRealizationBundle;
+    readonly baseSystemPrompt: string;
+    readonly baseUserPrompt: string;
+    readonly language: "zh" | "en";
+    readonly chapterNumber: number;
+    readonly temperature: number;
+    readonly countingMode: LengthSpec["countingMode"];
+  }): Promise<{ readonly creative: CreativeOutput; readonly usage: TokenUsage }> {
+    const usage: { promptTokens: number; completionTokens: number; totalTokens: number } = {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+    };
+    const completed: string[] = [];
+    const reviewer = new SemanticSceneReviewerAgent(this.ctx);
+    const repairer = new HumanSceneRepairAgent(this.ctx);
+    const budgetByEvent = new Map(
+      input.realization.concretenessPlan.map((item) => [item.eventId, item.plannedCharBudget]),
+    );
+    const fallbackBudget = Math.max(
+      300,
+      Math.round(
+        input.realization.concretenessPlan.reduce((sum, item) => sum + item.plannedCharBudget, 0)
+        / input.realization.scenes.length,
+      ),
+    );
+
+    for (const scene of input.realization.scenes) {
+      const directBudget = budgetByEvent.get(scene.plan.id);
+      const beatBudget = scene.plan.beatIds
+        .map((id) => budgetByEvent.get(id) ?? 0)
+        .reduce((sum, value) => sum + value, 0);
+      const targetChars = directBudget ?? (beatBudget > 0 ? beatBudget : fallbackBudget);
+      const previousTail = completed.at(-1)?.slice(-1_200) ?? "";
+      const response = await this.chat([
+        {
+          role: "system",
+          content: [
+            input.baseSystemPrompt,
+            "",
+            input.language === "en"
+              ? "SCENE-REALIZATION MODE: Write only the requested scene. Do not add a title, labels, analysis, new canon facts, or a later scene."
+              : "【逐场景实现模式】只写当前场景正文。不要输出标题、标签、说明，不要新增正史事实，不要提前写后续场景。",
+            input.language === "en"
+              ? "Every line must implement the supplied agendas, information carriers, interaction dependencies, and narration permissions. Narration without a matching permission is forbidden."
+              : "每一句都要实现给定人物议程、信息承载、互动依赖和旁白许可。没有匹配许可的解释性旁白禁止出现。",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: [
+            input.baseUserPrompt,
+            "",
+            `CURRENT_SCENE_JSON:\n${JSON.stringify(scene, null, 2)}`,
+            `TARGET_SCENE_CHARS: ${targetChars || fallbackBudget}`,
+            previousTail ? `PREVIOUS_SCENE_TAIL:\n${previousTail}` : "PREVIOUS_SCENE_TAIL: (opening scene)",
+            input.language === "en"
+              ? "Return scene prose only. End exactly at this scene's exit state."
+              : "只返回场景正文，并准确停在本场 exitState；不得用总结或预告收尾。",
+          ].join("\n\n"),
+        },
+      ], { temperature: input.temperature });
+      usage.promptTokens += response.usage.promptTokens;
+      usage.completionTokens += response.usage.completionTokens;
+      usage.totalTokens += response.usage.totalTokens;
+      let prose = cleanSceneProse(response.content);
+      if (countChapterLength(prose, input.countingMode) < 100) {
+        throw new Error(`Scene ${scene.plan.id} returned empty or unusably short prose`);
+      }
+
+      let reviewResult = await reviewer.review({ scene, content: prose, language: input.language });
+      addTokenUsage(usage, reviewResult.usage);
+      let review = normalizeSemanticReview(scene, reviewResult.review);
+      if (review.verdict === "block") {
+        throw new SceneSemanticGateError(scene.plan.id, review);
+      }
+
+      for (let iteration = 0; review.verdict === "repair" && iteration < 2; iteration += 1) {
+        const repaired = await repairer.repair({
+          originalScene: prose,
+          scenePlan: scene.plan,
+          characterAgendas: scene.characterAgendas,
+          informationUnits: scene.informationUnits,
+          interactionTurns: scene.interactionTurns,
+          narrationPermissions: scene.narrationPermissions,
+          review,
+          immutableFacts: buildSceneImmutableFacts(scene),
+          allowedChanges: buildSceneAllowedChanges(review),
+          language: input.language,
+        });
+        addTokenUsage(usage, repaired.usage);
+        const repairedProse = cleanSceneProse(repaired.content);
+        if (repairedProse === prose || countChapterLength(repairedProse, input.countingMode) < 100) {
+          throw new SceneSemanticGateError(scene.plan.id, review);
+        }
+        prose = repairedProse;
+        reviewResult = await reviewer.review({ scene, content: prose, language: input.language });
+        addTokenUsage(usage, reviewResult.usage);
+        review = normalizeSemanticReview(scene, reviewResult.review);
+        if (review.verdict === "block") {
+          throw new SceneSemanticGateError(scene.plan.id, review);
+        }
+      }
+
+      if (review.verdict !== "pass") {
+        throw new SceneSemanticGateError(scene.plan.id, review);
+      }
+      completed.push(prose);
+    }
+
+    const content = completed.join("\n\n");
+    return {
+      creative: {
+        title: input.language === "en"
+          ? `Chapter ${input.chapterNumber}`
+          : `第${input.chapterNumber}章`,
+        content,
+        wordCount: countChapterLength(content, input.countingMode),
+        preWriteCheck: input.realization.scenes
+          .map((scene) => `${scene.plan.id}: ${scene.plan.immediateGoal} → ${scene.plan.irreversibleChange}`)
+          .join("\n"),
+      },
+      usage,
     };
   }
 

@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { canonicalJson, sha256 } from "../story-system/commit.js";
 import type { ChapterIntent, ChapterMemo } from "../models/input-governance.js";
+import type { SceneRealizationBundle } from "../scene-realization/types.js";
 import { ChapterSpecSchema } from "./schemas.js";
 import { storySpecRoot } from "./constitution-loader.js";
 import { detectStorySpecPlaceholders } from "../scene-realization/placeholder-detector.js";
@@ -22,6 +23,8 @@ export interface EnsureChapterSpecInput {
   readonly targetCharacters?: ReadonlyArray<string>;
   readonly approvalMode?: StorySpecApprovalMode;
   readonly blockOnPlaceholders?: boolean;
+  readonly realization?: SceneRealizationBundle;
+  readonly realize?: () => Promise<SceneRealizationBundle>;
 }
 
 export class StorySpecApprovalRequiredError extends Error {
@@ -183,11 +186,15 @@ export async function ensureChapterSpec(input: EnsureChapterSpecInput): Promise<
   }));
   const current = await store.loadChapter(input.chapterNumber);
   if (current?.sourceIntentHash === intentHash && current.status !== "superseded") {
-    return maybeApprove(current, store, input);
+    const planning = input.blockOnPlaceholders ? detectStorySpecPlaceholders(current) : null;
+    if (planning?.verdict !== "block" || !input.realize) {
+      return maybeApprove(current, store, input);
+    }
   }
 
   const nextVersion = (current?.version ?? 0) + 1;
-  const spec = buildChapterSpec(input, intentHash, nextVersion);
+  const realization = input.realization ?? await input.realize?.();
+  const spec = buildChapterSpec(input, intentHash, nextVersion, realization);
   const saved = await store.saveChapter(spec);
   return maybeApprove(saved, store, input);
 }
@@ -210,13 +217,23 @@ function buildChapterSpec(
   input: EnsureChapterSpecInput,
   sourceIntentHash: string,
   version: number,
+  realization?: SceneRealizationBundle,
 ): ChapterSpec {
-  const goal = input.intent?.goal.trim() || input.memo?.goal.trim() || `完成第${input.chapterNumber}章的可验证状态变化`;
+  const goal = realization?.chapterGoal.trim()
+    || input.intent?.goal.trim()
+    || input.memo?.goal.trim()
+    || `完成第${input.chapterNumber}章的可验证状态变化`;
   const mustKeep = unique(input.intent?.mustKeep ?? []);
   const mustAvoid = unique(input.intent?.mustAvoid ?? []);
-  const expectedChanges = extractMemoChanges(input.memo?.body);
+  const expectedChanges = unique([
+    ...extractMemoChanges(input.memo?.body),
+    ...(realization?.scenes.map((scene) => scene.plan.irreversibleChange) ?? []),
+  ]);
   const beats = buildBeats(input.chapterNumber, goal, mustKeep, expectedChanges);
-  const scene = buildDefaultScene(input.chapterNumber, goal, input.targetCharacters ?? [], beats);
+  const scenes = realization
+    ? realization.scenes.map((scene) => sceneContractFromRealization(scene, beats))
+    : [buildDefaultScene(input.chapterNumber, goal, input.targetCharacters ?? [], beats)];
+  const firstScene = realization?.scenes[0]?.plan;
   const id = `chapter-spec-${sha256(`${input.bookId}\0${input.chapterNumber}\0${sourceIntentHash}`).slice(0, 24)}`;
   const createdAt = new Date().toISOString();
 
@@ -228,14 +245,22 @@ function buildChapterSpec(
     volumeId: `volume-${String(Math.floor((input.chapterNumber - 1) / 100) + 1).padStart(3, "0")}`,
     arcId: `arc-${String(Math.floor((input.chapterNumber - 1) / 40) + 1).padStart(3, "0")}`,
     chapterNumber: input.chapterNumber,
-    pov: input.targetCharacters?.[0] ?? "",
-    location: "",
-    time: "",
+    pov: firstScene?.povCharacterId ?? input.targetCharacters?.[0] ?? "",
+    location: firstScene?.location ?? "",
+    time: firstScene?.time ?? "",
     chapterGoal: goal,
     readerExpectation: extractMemoSection(input.memo?.body, "读者此刻在等什么"),
     emotionalTrajectoryId: `emotion-chapter-${String(input.chapterNumber).padStart(4, "0")}`,
     payoffTargets: extractMemoSection(input.memo?.body, "该兑现的"),
-    plannedEvents: unique([goal, ...mustKeep]),
+    plannedEvents: unique([
+      goal,
+      ...mustKeep,
+      ...(realization?.scenes.flatMap((scene) => [
+        scene.plan.turningPoint,
+        scene.plan.decisionPoint,
+        scene.plan.irreversibleChange,
+      ]) ?? []),
+    ]),
     requiredBeats: beats.filter((beat) => beat.strength === "hard").map((beat) => beat.id),
     hardConstraints: mustAvoid.map((item) => `禁止：${item}`),
     softTargets: unique(input.intent?.styleEmphasis ?? []),
@@ -255,10 +280,67 @@ function buildChapterSpec(
         evidenceTerms: meaningfulTerms(item),
       })),
     ],
-    sceneContracts: [scene],
+    sceneContracts: scenes,
+    ...(realization ? { sceneRealization: realization } : {}),
     beats,
     sourceIntentHash,
     createdAt,
+  };
+}
+
+function sceneContractFromRealization(
+  scene: SceneRealizationBundle["scenes"][number],
+  beats: ReadonlyArray<ControlledNarrativeBeat>,
+): SceneContract {
+  const carrierCounts = scene.informationUnits
+    .flatMap((unit) => unit.selectedCarriers)
+    .reduce<Record<string, number>>((counts, carrier) => {
+      counts[carrier] = (counts[carrier] ?? 0) + 1;
+      return counts;
+    }, {});
+  const density = (carrier: string): "low" | "medium" | "high" => {
+    const count = carrierCounts[carrier] ?? 0;
+    return count >= 3 ? "high" : count >= 1 ? "medium" : "low";
+  };
+  return {
+    id: scene.plan.id,
+    pov: scene.plan.povCharacterId,
+    immediateGoal: scene.plan.immediateGoal,
+    oppositionGoal: scene.plan.oppositionGoal,
+    characterAgendas: Object.fromEntries(scene.characterAgendas.map((agenda) => [agenda.characterId, {
+      wants: agenda.wantsNow,
+      fears: agenda.fearsNow,
+      hides: agenda.hides,
+      cannotSay: agenda.cannotSayDirectly,
+      tactic: agenda.tactic,
+      leverage: agenda.leverage,
+      exitCondition: `${agenda.successCondition}；撤退条件：${agenda.retreatCondition}`,
+    }])),
+    knownInformation: unique(scene.characterAgendas.flatMap((agenda) => agenda.knowledgeBoundary.knows)),
+    hiddenInformation: unique(scene.characterAgendas.flatMap((agenda) => [
+      ...agenda.hides,
+      ...agenda.knowledgeBoundary.falselyBelieves,
+    ])),
+    readerMustLearn: scene.informationUnits.filter((unit) => unit.readerNeedsNow).map((unit) => unit.fact),
+    readerMustNotKnowYet: scene.informationUnits
+      .filter((unit) => !unit.readerNeedsNow)
+      .map((unit) => unit.fact),
+    conflictMethod: scene.interactionTurns
+      .map((turn) => `${turn.initiator}以${turn.outwardActionOrDialogue}影响${turn.responder}`)
+      .join("；"),
+    turningPoint: scene.plan.turningPoint,
+    decisionPoint: scene.plan.decisionPoint,
+    irreversibleChange: scene.plan.irreversibleChange,
+    entryState: scene.plan.entryState,
+    exitState: scene.plan.exitState,
+    narrativeFunctions: scene.plan.narrativeFunctions,
+    deliveryPreference: {
+      dialogue: density("dialogue"),
+      action: density("action"),
+      thought: density("thought"),
+      narration: scene.narrationPermissions.length > 0 ? "limited" : "minimal",
+    },
+    beatIds: unique([...scene.plan.beatIds, ...beats.map((beat) => beat.id)]),
   };
 }
 

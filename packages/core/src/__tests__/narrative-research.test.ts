@@ -16,6 +16,7 @@ import {
   createDefaultEmotionTrajectory,
   detectMissingNarrativeLogic,
   extractNarrativeLogicNodes,
+  selectRelevantHistory,
   selectWeightedContext,
   validateEventCausalGraph,
 } from "../narrative-research/index.js";
@@ -201,6 +202,62 @@ describe("Narrative Research Adaptation Layer", () => {
     await plot.projectCommit(first);
     await plot.projectCommit(first);
     expect((await plot.load()).activeReaderExpectations).toEqual(["promise-1"]);
+  });
+
+  it("retrieves entity-relevant causal history instead of the latest event tail", () => {
+    const base = {
+      commitId: "commit-1",
+      object: undefined,
+      actorGoal: undefined,
+      prerequisiteEventIds: [] as string[],
+      consequenceEventIds: [] as string[],
+      stateChanges: [],
+      enables: [],
+      blocks: [],
+      certainty: "objective" as const,
+    };
+    const events = [
+      {
+        ...base,
+        id: "old-clue",
+        subject: { id: "林舟", name: "林舟" },
+        predicate: "取得验令簿线索",
+        causeEventIds: [],
+        time: { chapter: 2 },
+        location: { id: "北城门", name: "北城门" },
+        provenance: { sourceChapter: 2, sourceCommitId: "commit-1", sourceEventId: "old-clue", evidence: ["旧签名"] },
+      },
+      {
+        ...base,
+        id: "old-effect",
+        subject: { id: "赵横", name: "赵横" },
+        predicate: "隐藏旧签名",
+        causeEventIds: ["old-clue"],
+        time: { chapter: 3 },
+        location: { id: "北城门", name: "北城门" },
+        provenance: { sourceChapter: 3, sourceCommitId: "commit-1", sourceEventId: "old-effect", evidence: ["按住纸角"] },
+      },
+      ...Array.from({ length: 25 }, (_, index) => ({
+        ...base,
+        id: `recent-${index}`,
+        subject: { id: "无关商队", name: "无关商队" },
+        predicate: "经过南港",
+        causeEventIds: [],
+        time: { chapter: 50 + index },
+        location: { id: "南港", name: "南港" },
+        provenance: { sourceChapter: 50 + index, sourceCommitId: "commit-1", sourceEventId: `recent-${index}`, evidence: [] },
+      })),
+    ];
+    const selected = selectRelevantHistory(events, {
+      characterIds: ["赵横"],
+      locationIds: ["北城门"],
+      entityIds: ["林舟"],
+      hookIds: [],
+      plannedEventIds: ["old-effect"],
+      maxEvents: 5,
+    });
+    expect(selected.map((event) => event.id)).toEqual(["old-clue", "old-effect"]);
+    expect(selected.some((event) => event.id.startsWith("recent-"))).toBe(false);
   });
 
   it("reports missing causal references and preserves dynamic outline approval audit", async () => {

@@ -16,14 +16,19 @@ const PLACEHOLDER_PHRASES = [
   "由剧情决定",
 ] as const;
 
-export function detectStorySpecPlaceholders(spec: ChapterSpec): PlaceholderDetectionResult {
-  const fields = collectFields(spec);
-  const placeholders = new Set<string>();
-  for (const value of fields) {
+export function findPlaceholderPhrases(values: ReadonlyArray<string>): ReadonlyArray<string> {
+  const matches = new Set<string>();
+  for (const value of values) {
     for (const phrase of PLACEHOLDER_PHRASES) {
-      if (value.includes(phrase)) placeholders.add(phrase);
+      if (value.includes(phrase)) matches.add(phrase);
     }
   }
+  return [...matches];
+}
+
+export function detectStorySpecPlaceholders(spec: ChapterSpec): PlaceholderDetectionResult {
+  const fields = collectFields(spec);
+  const placeholders = findPlaceholderPhrases(fields);
 
   const missingFields = new Set<string>();
   requireText(missingFields, "pov", spec.pov);
@@ -56,9 +61,9 @@ export function detectStorySpecPlaceholders(spec: ChapterSpec): PlaceholderDetec
   });
 
   return {
-    placeholders: [...placeholders],
+    placeholders,
     missingFields: [...missingFields],
-    verdict: placeholders.size === 0 && missingFields.size === 0 ? "pass" : "block",
+    verdict: placeholders.length === 0 && missingFields.size === 0 ? "pass" : "block",
   };
 }
 

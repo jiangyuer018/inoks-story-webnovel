@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SceneRealizationBundleSchema } from "../scene-realization/schemas.js";
 
 export const StoryConstraintStrengthSchema = z.enum(["hard", "soft", "open"]);
 export const StorySpecStatusSchema = z.preprocess(
@@ -112,6 +113,7 @@ export const ChapterSpecSchema = z.object({
   requiredStateChanges: z.array(z.string()).default([]),
   acceptanceCriteria: z.array(AcceptanceCriterionSchema).default([]),
   sceneContracts: z.array(SceneContractSchema).default([]),
+  sceneRealization: SceneRealizationBundleSchema.optional(),
   beats: z.array(ControlledNarrativeBeatSchema).default([]),
   sourceIntentHash: z.string().min(1),
   createdAt: z.string().datetime(),

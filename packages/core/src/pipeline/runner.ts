@@ -89,6 +89,8 @@ import {
   compileWritingContract,
   ensureChapterSpec,
   runStoryConvergence,
+  StorySpecApprovalRequiredError,
+  StorySpecStore,
   type CompiledWritingContract,
 } from "../story-spec/index.js";
 import {
@@ -108,6 +110,7 @@ import {
   savePayoffAudit,
 } from "../story-craft/index.js";
 import { BenchmarkStore } from "../benchmark/index.js";
+import { SceneRealizationPlanner } from "../scene-realization/index.js";
 
 const SEQUENCE_LEVEL_CATEGORIES = new Set([
   "Pacing Monotony", "节奏单调",
@@ -392,6 +395,8 @@ export interface PlanChapterResult {
   readonly intentPath: string;
   readonly goal: string;
   readonly conflicts: ReadonlyArray<string>;
+  readonly storySpecStatus?: "awaiting-review" | "approved" | "active";
+  readonly storySpecPath?: string;
 }
 
 export interface ComposeChapterResult extends PlanChapterResult {
@@ -1211,13 +1216,23 @@ export class PipelineRunner {
       externalContext,
       { reuseExistingIntentWhenContextMissing: false },
     );
-    await this.compileChapterWritingContract({
-      book,
-      bookDir,
-      chapterNumber,
-      intent: plan.intent,
-      memo: plan.memo,
-    });
+    let storySpecStatus: PlanChapterResult["storySpecStatus"];
+    let storySpecPath: string | undefined;
+    try {
+      const contract = await this.compileChapterWritingContract({
+        book,
+        bookDir,
+        chapterNumber,
+        intent: plan.intent,
+        memo: plan.memo,
+      });
+      storySpecStatus = contract.chapterSpec.status === "active" ? "active" : "approved";
+      storySpecPath = new StorySpecStore(bookDir).specPath(chapterNumber);
+    } catch (error) {
+      if (!(error instanceof StorySpecApprovalRequiredError)) throw error;
+      storySpecStatus = "awaiting-review";
+      storySpecPath = error.specPath;
+    }
 
     return {
       bookId,
@@ -1225,6 +1240,8 @@ export class PipelineRunner {
       intentPath: relativeToBookDir(bookDir, plan.runtimePath),
       goal: plan.intent.goal,
       conflicts: [],
+      ...(storySpecStatus ? { storySpecStatus } : {}),
+      ...(storySpecPath ? { storySpecPath: relativeToBookDir(bookDir, storySpecPath) } : {}),
     };
   }
 
@@ -1255,6 +1272,7 @@ export class PipelineRunner {
       chapterNumber,
       intent: plan.intent,
       memo: plan.memo,
+      contextPackage: composed.contextPackage,
     });
 
     return {
@@ -4357,6 +4375,7 @@ ${matrix}`,
       chapterNumber,
       intent: plan.intent,
       memo: plan.memo,
+      contextPackage: composed.contextPackage,
     });
 
     return {
@@ -4376,7 +4395,12 @@ ${matrix}`,
     readonly chapterNumber: number;
     readonly intent?: WriteChapterInput["chapterIntentData"];
     readonly memo?: ChapterMemo;
+    readonly contextPackage?: ContextPackage;
   }): Promise<CompiledWritingContract> {
+    const requireConcretePlanning = this.config.blockOnStorySpecPlaceholders ?? false;
+    const realizationPlanner = requireConcretePlanning
+      ? new SceneRealizationPlanner(this.agentCtxFor("scene-realization-planner", params.book.id))
+      : null;
     const spec = await ensureChapterSpec({
       bookId: params.book.id,
       bookDir: params.bookDir,
@@ -4385,15 +4409,75 @@ ${matrix}`,
       memo: params.memo,
       approvalMode: this.config.storySpecApprovalMode ?? "automatic",
       blockOnPlaceholders: this.config.blockOnStorySpecPlaceholders ?? false,
+      ...(realizationPlanner ? {
+        realize: () => realizationPlanner.plan({
+          book: params.book,
+          chapterNumber: params.chapterNumber,
+          intent: params.intent,
+          memo: params.memo,
+          contextPackage: params.contextPackage,
+          targetChars: params.book.chapterWordCount,
+        }),
+      } : {}),
     });
+    if (spec.status !== "approved" && spec.status !== "active") {
+      const store = new StorySpecStore(params.bookDir);
+      throw new StorySpecApprovalRequiredError(spec, store.specPath(params.chapterNumber));
+    }
     const benchmarkStore = new BenchmarkStore(params.bookDir);
-    const [dynamicPlotState, eventGraph, readerContract, payoffTargets, benchmarkGuidance] = await Promise.all([
+    const eventGraphStore = new EventCausalGraphStore(params.bookDir);
+    const [dynamicPlotState, readerContract, payoffTargets, benchmarkGuidance] = await Promise.all([
       new DynamicPlotStateStore(params.bookDir).load(),
-      new EventCausalGraphStore(params.bookDir).load(),
       new ReaderContractStore(params.bookDir).ensure(),
       new PayoffLedgerStore(params.bookDir).dueAt(params.chapterNumber),
       benchmarkStore.approvedMechanisms(),
     ]);
+    const realizedScenes = spec.sceneRealization?.scenes ?? [];
+    const characterIds = [...new Set([
+      spec.pov,
+      ...realizedScenes.flatMap((scene) => [scene.plan.povCharacterId, ...scene.plan.cast]),
+      ...dynamicPlotState.currentGoals.map((goal) => goal.characterId),
+    ].filter(Boolean))];
+    const relevantEventGraph = await eventGraphStore.relevant({
+      characterIds,
+      locationIds: [...new Set(realizedScenes.map((scene) => scene.plan.location).filter(Boolean))],
+      entityIds: [...new Set([
+        ...dynamicPlotState.availableResources.flatMap((resource) => [resource.id, resource.owner]),
+        ...dynamicPlotState.immediateThreats.map((threat) => threat.target),
+      ].filter(Boolean))],
+      hookIds: [...new Set([
+        ...spec.payoffTargets,
+        ...spec.readerExpectation,
+        ...dynamicPlotState.activeReaderExpectations,
+      ].filter(Boolean))],
+      plannedEventIds: [...new Set([
+        ...spec.beats.map((beat) => beat.id),
+        ...realizedScenes.flatMap((scene) => [scene.plan.id, ...scene.plan.beatIds]),
+      ])],
+      semanticTerms: [
+        spec.chapterGoal,
+        ...spec.plannedEvents,
+        ...realizedScenes.flatMap((scene) => [
+          scene.plan.immediateGoal,
+          scene.plan.oppositionGoal,
+          scene.plan.turningPoint,
+          scene.plan.irreversibleChange,
+        ]),
+      ],
+      beforeChapter: params.chapterNumber,
+      maxEvents: 20,
+    });
+    const characterStates = realizedScenes.flatMap((scene) => scene.characterAgendas.map((agenda) => ({
+      characterId: agenda.characterId,
+      desire: agenda.wantsNow,
+      fear: agenda.fearsNow,
+      belief: Object.entries(agenda.beliefAboutOthers).map(([id, belief]) => `${id}：${belief}`).join("；") || agenda.tactic,
+      selfImage: agenda.successCondition,
+      relationshipBeliefs: agenda.beliefAboutOthers,
+      emotionalPressure: [agenda.fearsNow, ...agenda.cannotSayDirectly],
+      copingStrategy: agenda.tactic,
+      contradiction: [agenda.wantsNow, ...agenda.hides].join("；"),
+    })));
     const emotionalTrajectory = createDefaultEmotionTrajectory({
       id: spec.emotionalTrajectoryId,
       ownerCharacterId: spec.pov || undefined,
@@ -4409,7 +4493,8 @@ ${matrix}`,
       benchmarkGuidance,
       emotionalTrajectory,
       dynamicPlotState,
-      relevantEventGraph: eventGraph.slice(-20),
+      characterStates,
+      relevantEventGraph,
       requireReaderContract: this.config.requireReaderContract ?? false,
       blockOnPlaceholders: this.config.blockOnStorySpecPlaceholders ?? false,
     });
