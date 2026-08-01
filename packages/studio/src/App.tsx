@@ -32,7 +32,7 @@ import { useTheme } from "./hooks/use-theme";
 import { useI18n } from "./hooks/use-i18n";
 import { setAppLanguage, tr } from "./lib/app-language";
 import { postApi, putApi, useApi } from "./hooks/use-api";
-import { Sun, Moon } from "lucide-react";
+import { Sun, Moon, Menu, X } from "lucide-react";
 import { House } from "lucide-react";
 
 export type { HashRoute as Route } from "./hooks/use-hash-route";
@@ -62,6 +62,7 @@ export function App() {
   const { data: project, error: projectError, refetch: refetchProject } = useApi<{ language: string; languageExplicit: boolean }>("/project");
   const [showLanguageSelector, setShowLanguageSelector] = useState(false);
   const [ready, setReady] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const isDark = theme === "dark";
 
@@ -89,6 +90,10 @@ export function App() {
   }, [project]);
 
   useSessionEvents(sse, route, setRoute);
+
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [route]);
 
   const nav = {
     toDashboard: () => setRoute({ page: "dashboard" }),
@@ -180,25 +185,55 @@ export function App() {
   return (
     <div className="h-screen bg-background text-foreground flex overflow-hidden font-sans">
       {/* Left Sidebar */}
-      <Sidebar nav={nav} activePage={activePage} sse={sse} t={t} />
+      {mobileSidebarOpen && (
+        <button
+          type="button"
+          aria-label="关闭导航菜单"
+          className="fixed inset-0 z-40 bg-foreground/25 md:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 md:static md:z-auto md:block ${
+          mobileSidebarOpen ? "block" : "hidden"
+        }`}
+      >
+        <Sidebar nav={nav} activePage={activePage} sse={sse} t={t} />
+        <button
+          type="button"
+          aria-label="关闭导航菜单"
+          className="absolute right-2 top-2 inline-flex size-9 items-center justify-center border-2 border-foreground bg-card shadow-[2px_2px_0_var(--border-primary)] md:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        >
+          <X size={18} />
+        </button>
+      </div>
 
       {/* Center Content */}
-      <div className="flex-1 flex flex-col min-w-0 bg-background/30 backdrop-blur-sm">
+      <div className="flex-1 flex flex-col min-w-0 bg-background/70">
         {/* Header Strip */}
-        <header className="h-14 shrink-0 flex items-center justify-between px-8 border-b border-border/40">
+        <header className="h-14 shrink-0 flex items-center justify-between gap-2 px-3 md:px-8 border-b-2 border-foreground/80 bg-card">
           <div className="flex items-center gap-2">
              <button
+               type="button"
+               onClick={() => setMobileSidebarOpen(true)}
+               aria-label="打开导航菜单"
+               className="inline-flex size-9 shrink-0 items-center justify-center rounded-sm border-2 border-foreground bg-card shadow-[2px_2px_0_var(--border-primary)] md:hidden"
+             >
+               <Menu size={18} />
+             </button>
+             <button
                onClick={nav.toDashboard}
-               className="inline-flex items-center gap-2 rounded-lg border border-border/50 bg-card/70 px-3.5 py-2 text-[17px] font-semibold text-foreground hover:bg-secondary/50 transition-colors"
+               className="inline-flex items-center gap-2 rounded-sm border-2 border-foreground bg-card px-2.5 py-2 text-[15px] font-semibold text-foreground shadow-[2px_2px_0_var(--border-primary)] transition-[transform,box-shadow,background-color] duration-100 ease-[steps(2,end)] hover:-translate-x-px hover:-translate-y-px hover:bg-secondary md:px-3.5 md:text-[17px]"
              >
                <House size={18} />
                <span>{t("bread.home")}</span>
-               <span className="text-muted-foreground/70">/</span>
-               <span className="font-serif">Inoks Story Webnovel Studio</span>
+               <span className="hidden text-muted-foreground/70 sm:inline">/</span>
+               <span className="hidden font-mono text-[13px] tracking-[0.04em] sm:inline">INOKS STORY STUDIO</span>
              </button>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2 md:gap-3">
             <div className="flex gap-0.5 bg-muted/50 rounded-lg p-0.5">
               <button
                 onClick={async () => {
@@ -222,7 +257,9 @@ export function App() {
 
             <button
               onClick={() => setTheme(isDark ? "light" : "dark")}
-              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label={isDark ? "切换到暖色亮色主题" : "切换到深棕夜间主题"}
+              title={isDark ? "切换到暖色亮色主题" : "切换到深棕夜间主题"}
+              className="inline-flex size-8 items-center justify-center rounded-sm border border-transparent text-muted-foreground transition-colors duration-100 hover:border-border hover:bg-muted hover:text-foreground"
             >
               {isDark ? <Sun size={18} /> : <Moon size={18} />}
             </button>

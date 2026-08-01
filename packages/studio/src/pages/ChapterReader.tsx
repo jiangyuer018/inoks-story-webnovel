@@ -226,7 +226,7 @@ export function ChapterReader({ bookId, chapterNumber, nav, theme, t }: {
         </section>
       )}
 
-      <div className="paper-sheet rounded-2xl p-8 md:p-16 lg:p-24 shadow-2xl shadow-primary/5 min-h-[80vh] relative overflow-hidden">
+      <div className="paper-sheet rounded-sm p-8 md:p-16 lg:p-24 min-h-[80vh] relative overflow-hidden">
         {/* Physical Paper Details */}
         <div className="absolute top-0 left-8 w-px h-full bg-primary/5 hidden md:block" />
         <div className="absolute top-0 right-8 w-px h-full bg-primary/5 hidden md:block" />
@@ -237,7 +237,7 @@ export function ChapterReader({ bookId, chapterNumber, nav, theme, t }: {
             <BookOpen size={20} />
             <div className="h-px w-12 bg-border/40" />
           </div>
-          <h1 className="text-4xl md:text-5xl font-serif font-medium italic text-foreground tracking-tight leading-tight">
+          <h1 className="text-4xl md:text-5xl font-serif font-semibold text-foreground tracking-tight leading-tight">
             {title}
           </h1>
           <div className="mt-8 flex items-center justify-center gap-4 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/60">
@@ -251,13 +251,13 @@ export function ChapterReader({ bookId, chapterNumber, nav, theme, t }: {
           <textarea
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
-            className="w-full min-h-[60vh] bg-transparent font-serif text-lg leading-[1.8] text-foreground/90 focus:outline-none resize-none border border-border/30 rounded-lg p-6 focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
+            className="w-full min-h-[60vh] bg-transparent font-serif text-lg leading-[1.9] tracking-[0.02em] text-foreground/90 focus:outline-none resize-none border border-border rounded-sm p-6 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors duration-100"
             autoFocus
           />
         ) : (
           <article className="prose prose-zinc dark:prose-invert max-w-none">
             {paragraphs.map((para, i) => (
-              <p key={i} className="font-serif text-lg md:text-xl leading-[1.8] text-foreground/90 mb-8 first-letter:text-2xl first-letter:font-bold first-letter:text-primary/40">
+              <p key={i} className="font-serif text-[17px] leading-[1.9] tracking-[0.02em] text-foreground/90 mb-8">
                 {para}
               </p>
             ))}
