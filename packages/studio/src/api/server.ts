@@ -4337,7 +4337,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       detectStorySpecPlaceholders,
       PayoffLedgerStore,
       PublicationStore,
+      ReaderContractStore,
       StorySpecStore,
+      missingReaderContractSections,
       loadStoryConstitution,
       resolveBookAutomation,
       runStorySystemPreflight,
@@ -4370,6 +4372,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       commits,
       projectionFailures,
       latestMigration,
+      readerContract,
+      approvalRecords,
     ] = await Promise.all([
       state.loadBookConfig(id),
       loadStoryConstitution(bookDir),
@@ -4389,6 +4393,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       new ChapterCommitStore(bookDir).listCommits(),
       latestProjectionFailures(bookDir),
       loadLatestStoryMigrationReport(bookDir),
+      new ReaderContractStore(bookDir).ensure(),
+      new ChapterApprovalStore(bookDir).listRecords(),
     ]);
     return c.json({
       bookId: id,
@@ -4419,7 +4425,36 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
         automaticPublicationEnabled: false,
       },
       quality,
+      readerContract: {
+        ...readerContract,
+        missingSections: missingReaderContractSections(readerContract),
+        ready: missingReaderContractSections(readerContract).length === 0,
+      },
+      pendingApprovals: approvalRecords
+        .filter((record) => !["committed", "rejected", "exported", "published"].includes(record.lifecycleStatus))
+        .map((record) => ({
+          chapter: record.chapter,
+          title: record.title,
+          status: record.lifecycleStatus,
+          contentHash: record.contentHash,
+          reviewedContentHash: record.reviewedContentHash,
+          proseQuality: record.proseQuality ?? null,
+        })),
     });
+  });
+
+  app.put("/api/v1/books/:id/story-workbench/reader-contract", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) throw new ApiError(400, "INVALID_BOOK_ID", "Invalid book id");
+    const {
+      ReaderContractContentSchema,
+      ReaderContractStore,
+      missingReaderContractSections,
+    } = await import("@inoks-story-webnovel/core");
+    const content = ReaderContractContentSchema.parse(await c.req.json());
+    const contract = await new ReaderContractStore(state.bookDir(id)).save(content);
+    const missingSections = missingReaderContractSections(contract);
+    return c.json({ ...contract, missingSections, ready: missingSections.length === 0 });
   });
 
   app.post("/api/v1/books/:id/story-workbench/outline/:revision/decision", async (c) => {

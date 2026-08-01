@@ -136,6 +136,18 @@ export class ChapterApprovalStore {
     return false;
   }
 
+  async listRecords(): Promise<ReadonlyArray<PendingChapterApproval>> {
+    const { readdir } = await import("node:fs/promises");
+    const names = await readdir(this.root).catch(() => [] as string[]);
+    const records: PendingChapterApproval[] = [];
+    for (const name of names.filter((value) => /^chapter-\d{4}$/.test(value))) {
+      const raw = await readFile(join(this.root, name, "approval.json"), "utf-8").catch(() => "");
+      if (!raw) continue;
+      records.push(PendingChapterApprovalSchema.parse(JSON.parse(raw)) as PendingChapterApproval);
+    }
+    return records.sort((left, right) => left.chapter - right.chapter);
+  }
+
   async save(params: {
     readonly record: Omit<PendingChapterApproval, "schemaVersion" | "contentHash" | "createdAt" | "updatedAt"> & {
       readonly createdAt?: string;

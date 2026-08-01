@@ -112,6 +112,40 @@ describe("Story workbench API", () => {
     });
   });
 
+  it("persists a complete Reader Contract and exposes readiness for first-chapter planning", async () => {
+    const app = createStudioServer({} as never, root);
+    const before = await (await app.request("/api/v1/books/demo/story-workbench")).json() as {
+      readerContract: { ready: boolean; missingSections: string[]; version: number };
+    };
+    expect(before.readerContract.ready).toBe(false);
+    expect(before.readerContract.missingSections).toContain("coreFantasy");
+
+    const response = await app.request("/api/v1/books/demo/story-workbench/reader-contract", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        coreFantasy: ["林舟凭线索和规则撬动封闭城防体系"],
+        emotionalPromises: ["每次选择都带来可见代价与反击空间"],
+        progressionPromises: ["林舟从被追捕者成长为掌握城防证据链的人"],
+        relationshipPromises: ["林舟与赵横在互相试探中不断改变筹码"],
+        mysteryPromises: ["死去驿卒留下的内应名单会逐层揭晓"],
+        identityPromises: ["林舟与旧城防档案的身份关联会有事实兑现"],
+        forbiddenBetrayals: ["不得让关键证据无因失效或让人物越过知识边界"],
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ready: true, missingSections: [], version: 2 });
+
+    const after = await (await app.request("/api/v1/books/demo/story-workbench")).json() as {
+      readerContract: { ready: boolean; coreFantasy: string[]; version: number };
+    };
+    expect(after.readerContract).toMatchObject({
+      ready: true,
+      coreFantasy: ["林舟凭线索和规则撬动封闭城防体系"],
+      version: 2,
+    });
+  });
+
   it("shows concrete-planning blockers and approves only the exact reviewed Story Spec version", async () => {
     const bookDir = join(root, "books", "demo");
     const generated = await ensureChapterSpec({

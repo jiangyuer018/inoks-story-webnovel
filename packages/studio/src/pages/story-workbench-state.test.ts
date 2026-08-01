@@ -96,6 +96,39 @@ describe("deriveWorkbenchOverviewState", () => {
     });
   });
 
+  it("requires the Reader Contract before first-chapter generation", () => {
+    const state = derive({ readerContractReady: false });
+    expect(state.nextAction).toMatchObject({
+      title: "完成 Reader Contract",
+      destination: "spec",
+      requiresAttention: true,
+    });
+  });
+
+  it("shows human approval instead of sending a reviewed draft back to quality reports", () => {
+    const state = derive({
+      readerContractReady: true,
+      proseReports: [{ chapter: 1, blockingCount: 0, finalStatus: "accepted" }],
+      humanReports: [{ chapter: 1, verdict: "pass" }],
+      pendingChapterApprovals: [{ chapter: 1, status: "awaiting-human-approval" }],
+    });
+    expect(state.nextAction).toMatchObject({
+      title: "批准第 1 章正文",
+      destination: "book",
+      requiresAttention: true,
+    });
+  });
+
+  it("does not treat a committed chapter's older report as a current blocker", () => {
+    const state = derive({
+      readerContractReady: true,
+      storyHeadChapter: 4,
+      proseReports: [{ chapter: 4, blockingCount: 2, finalStatus: "rejected" }],
+      humanReports: [{ chapter: 4, verdict: "block" }],
+    });
+    expect(state.nextAction).toMatchObject({ title: "生成第 5 章", destination: "book" });
+  });
+
   it("routes legacy chapters without commits to migration before every other action", () => {
     const state = derive({
       pendingOutlineCount: 2,

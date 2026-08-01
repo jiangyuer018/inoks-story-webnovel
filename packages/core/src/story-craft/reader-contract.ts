@@ -1,5 +1,23 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { z } from "zod";
+
+const ContractListSchema = z.array(z.string().trim().min(1)).default([]);
+
+export const ReaderContractContentSchema = z.object({
+  coreFantasy: ContractListSchema,
+  emotionalPromises: ContractListSchema,
+  progressionPromises: ContractListSchema,
+  relationshipPromises: ContractListSchema,
+  mysteryPromises: ContractListSchema,
+  identityPromises: ContractListSchema,
+  forbiddenBetrayals: ContractListSchema,
+});
+
+export const ReaderContractSchema = ReaderContractContentSchema.extend({
+  version: z.number().int().min(1),
+  updatedAt: z.string().datetime(),
+});
 
 export interface ReaderContract {
   readonly coreFantasy: ReadonlyArray<string>;
@@ -22,7 +40,7 @@ export class ReaderContractStore {
 
   async load(): Promise<ReaderContract | null> {
     const raw = await readFile(this.path, "utf-8").catch(() => "");
-    return raw ? JSON.parse(raw) as ReaderContract : null;
+    return raw ? ReaderContractSchema.parse(JSON.parse(raw)) : null;
   }
 
   async ensure(seed: {
@@ -48,11 +66,11 @@ export class ReaderContractStore {
 
   async save(next: Omit<ReaderContract, "version" | "updatedAt">): Promise<ReaderContract> {
     const current = await this.load();
-    const contract: ReaderContract = {
-      ...next,
+    const contract = ReaderContractSchema.parse({
+      ...ReaderContractContentSchema.parse(next),
       version: (current?.version ?? 0) + 1,
       updatedAt: new Date().toISOString(),
-    };
+    });
     await writeJsonAtomic(this.path, contract);
     return contract;
   }

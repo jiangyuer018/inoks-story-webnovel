@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -42,6 +42,82 @@ interface StoryWorkbenchData {
       readonly missingFields: ReadonlyArray<string>;
       readonly verdict: "pass" | "block";
     };
+    readonly sceneRealization?: {
+      readonly schemaVersion: string;
+      readonly scenes: ReadonlyArray<{
+        readonly plan: {
+          readonly id: string;
+          readonly order: number;
+          readonly location: string;
+          readonly time: string;
+          readonly immediateGoal: string;
+          readonly oppositionGoal: string;
+          readonly stakes: string;
+          readonly turningPoint: string;
+          readonly decisionPoint: string;
+          readonly irreversibleChange: string;
+          readonly status: string;
+        };
+        readonly characterAgendas: ReadonlyArray<{
+          readonly characterId: string;
+          readonly wantsNow: string;
+          readonly fearsNow: string;
+          readonly hides: ReadonlyArray<string>;
+          readonly cannotSayDirectly: ReadonlyArray<string>;
+          readonly tactic: string;
+        }>;
+        readonly informationUnits: ReadonlyArray<{
+          readonly id: string;
+          readonly fact: string;
+          readonly selectedCarriers: ReadonlyArray<string>;
+          readonly deliveryMethod: string;
+          readonly consequence: string;
+          readonly narrationAllowed: boolean;
+        }>;
+        readonly interactionTurns: ReadonlyArray<{
+          readonly order: number;
+          readonly initiator: string;
+          readonly responder: string;
+          readonly stimulus: string;
+          readonly strategyAfter: string;
+          readonly outwardActionOrDialogue: string;
+          readonly effectOnOtherCharacter: string;
+        }>;
+        readonly narrationPermissions: ReadonlyArray<{
+          readonly informationUnitId: string;
+          readonly reason: string;
+          readonly maximumChars: number;
+          readonly requiredContent: string;
+        }>;
+      }>;
+    };
+  }>;
+  readonly readerContract: {
+    readonly coreFantasy: ReadonlyArray<string>;
+    readonly emotionalPromises: ReadonlyArray<string>;
+    readonly progressionPromises: ReadonlyArray<string>;
+    readonly relationshipPromises: ReadonlyArray<string>;
+    readonly mysteryPromises: ReadonlyArray<string>;
+    readonly identityPromises: ReadonlyArray<string>;
+    readonly forbiddenBetrayals: ReadonlyArray<string>;
+    readonly version: number;
+    readonly updatedAt: string;
+    readonly missingSections: ReadonlyArray<ReaderContractField>;
+    readonly ready: boolean;
+  };
+  readonly pendingApprovals: ReadonlyArray<{
+    readonly chapter: number;
+    readonly title: string;
+    readonly status: string;
+    readonly contentHash: string;
+    readonly reviewedContentHash: string;
+    readonly proseQuality: {
+      readonly score: number;
+      readonly level: string;
+      readonly blockingCount: number;
+      readonly advisoryCount: number;
+      readonly repaired: boolean;
+    } | null;
   }>;
   readonly outlineRevisions: ReadonlyArray<{
     readonly id: string;
@@ -259,7 +335,7 @@ export function StoryWorkbench({
       {tab === "outline" && <OutlinePanel data={data} busy={busy} act={act} path={path} />}
       {tab === "benchmark" && <BenchmarkPanel data={data} busy={busy} act={act} path={path} />}
       {tab === "quality" && <QualityPanel data={data} busy={busy} act={act} path={path} />}
-      {tab === "canon" && <CanonPanel data={data} />}
+      {tab === "canon" && <CanonPanel data={data} busy={busy} act={act} path={path} />}
       {tab === "system" && <SystemPanel data={data} path={path} busy={busy} act={act} bookId={bookId} />}
       {tab === "automation" && <AutomationPanel data={data} busy={busy} act={act} path={path} />}
       {tab === "publishing" && <PublishingPanel data={data} busy={busy} act={act} path={path} />}
@@ -302,13 +378,20 @@ function OverviewPanel({
     rejectedCommitCount: data.storySystem.rejectedCommitCount,
     proseReports: data.quality.prose,
     humanReports: data.quality["human-feel"],
+    readerContractReady: data.readerContract.ready,
+    pendingSpecCount: data.specs.filter((spec) => spec.status === "awaiting-review").length,
+    pendingChapterApprovals: data.pendingApprovals,
   });
   const { latestProse, latestHuman, nextAction } = overview;
   const stages = [
     {
       label: "章纲与约束",
-      detail: data.specs.length > 0 ? `${data.specs.length} 个 Chapter Spec` : "尚未生成 Chapter Spec",
-      state: data.specs.some((spec) => spec.status === "stale") ? "attention" : data.specs.length > 0 ? "done" : "waiting",
+      detail: !data.readerContract.ready
+        ? `Reader Contract 仍缺 ${data.readerContract.missingSections.length} 项`
+        : data.specs.length > 0 ? `${data.specs.length} 个 Chapter Spec` : "Reader Contract 已就绪，尚未生成 Chapter Spec",
+      state: !data.readerContract.ready || data.specs.some((spec) => spec.status === "stale" || spec.status === "awaiting-review")
+        ? "attention"
+        : data.specs.length > 0 ? "done" : "waiting",
     },
     {
       label: "动态调整",
@@ -407,10 +490,54 @@ function OverviewPanel({
   );
 }
 
-function CanonPanel({ data }: { readonly data: StoryWorkbenchData }) {
+function CanonPanel(props: PanelProps) {
+  const { data } = props;
   return (
-    <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="rounded-2xl border border-border bg-card">
+    <section className="space-y-5">
+      {data.pendingApprovals.length > 0 && (
+        <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.07]">
+          <header className="border-b border-amber-500/25 px-5 py-4">
+            <h2 className="text-xl">待作者批准正文</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              只有批准的正文哈希可以进入 accepted ChapterCommit；批准后正文若再变化，批准自动失效。
+            </p>
+          </header>
+          <div className="divide-y divide-amber-500/20">
+            {data.pendingApprovals.map((pending) => (
+              <div key={pending.chapter} className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+                <div>
+                  <p className="font-medium">第 {pending.chapter} 章 · {pending.title}</p>
+                  <p className="mt-1 font-mono text-xs text-muted-foreground" title={pending.contentHash}>
+                    reviewed {pending.reviewedContentHash.slice(0, 12)} · current {pending.contentHash.slice(0, 12)}
+                  </p>
+                  {pending.proseQuality && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Prose {pending.proseQuality.score} · {pending.proseQuality.level} · blocking {pending.proseQuality.blockingCount}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <StatusBadge value={pending.status} />
+                  {pending.status === "awaiting-human-approval" && (
+                    <ActionButton
+                      busy={props.busy === `chapter:${pending.chapter}:approve`}
+                      onClick={() => props.act(
+                        `chapter:${pending.chapter}:approve`,
+                        () => postApi(`/books/${encodeURIComponent(data.bookId)}/chapters/${pending.chapter}/approve`, {}),
+                        `第 ${pending.chapter} 章已按当前审查哈希批准并提交正史。`,
+                      )}
+                    >
+                      <ShieldCheck size={14} /> 批准并提交正史
+                    </ActionButton>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="rounded-2xl border border-border bg-card">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
           <div>
             <h2 className="text-xl">正史与投影预检</h2>
@@ -430,8 +557,8 @@ function CanonPanel({ data }: { readonly data: StoryWorkbenchData }) {
             <List values={data.storyPreflight.warnings} empty="" />
           </div>
         )}
-      </div>
-      <div className="rounded-2xl border border-border bg-card p-5">
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-5">
         <h2 className="text-xl">读者合同与叙事债务</h2>
         <p className="mt-1 text-sm text-muted-foreground">摘要只用于压缩；兑现账本不会覆盖客观事实。</p>
         <div className="mt-4 space-y-3">
@@ -446,10 +573,36 @@ function CanonPanel({ data }: { readonly data: StoryWorkbenchData }) {
             </div>
           ))}
         </div>
+        </div>
       </div>
     </section>
   );
 }
+
+type ReaderContractField =
+  | "coreFantasy"
+  | "emotionalPromises"
+  | "progressionPromises"
+  | "relationshipPromises"
+  | "mysteryPromises"
+  | "identityPromises"
+  | "forbiddenBetrayals";
+
+type ReaderContractDraft = Record<ReaderContractField, string>;
+
+const READER_CONTRACT_FIELDS: ReadonlyArray<{
+  readonly key: ReaderContractField;
+  readonly label: string;
+  readonly hint: string;
+}> = [
+  { key: "coreFantasy", label: "核心幻想", hint: "读者持续获得的核心代入与满足" },
+  { key: "emotionalPromises", label: "情绪承诺", hint: "作品长期承诺提供的主要情绪体验" },
+  { key: "progressionPromises", label: "成长承诺", hint: "能力、地位或选择空间将如何增长" },
+  { key: "relationshipPromises", label: "关系承诺", hint: "关键关系将经历的张力与变化" },
+  { key: "mysteryPromises", label: "谜团承诺", hint: "读者等待揭晓的核心问题" },
+  { key: "identityPromises", label: "身份承诺", hint: "身份揭露、认可或归属方面的承诺" },
+  { key: "forbiddenBetrayals", label: "禁止背叛事项", hint: "作品绝不能无铺垫违背的读者信任" },
+];
 
 function SystemPanel(props: PanelProps & { readonly bookId: string }) {
   const { data } = props;
@@ -632,10 +785,107 @@ function CanonicalValue({
   );
 }
 
+function readerContractToDraft(contract: StoryWorkbenchData["readerContract"]): ReaderContractDraft {
+  return Object.fromEntries(READER_CONTRACT_FIELDS.map((field) => [
+    field.key,
+    contract[field.key].join("\n"),
+  ])) as ReaderContractDraft;
+}
+
+function readerContractFromDraft(draft: ReaderContractDraft): Record<ReaderContractField, string[]> {
+  return Object.fromEntries(READER_CONTRACT_FIELDS.map((field) => [
+    field.key,
+    draft[field.key].split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
+  ])) as Record<ReaderContractField, string[]>;
+}
+
+function SceneValue({ label, value }: { readonly label: string; readonly value: string }) {
+  return (
+    <div className="rounded-md border border-border px-3 py-3">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 text-sm leading-6">{value}</dd>
+    </div>
+  );
+}
+
+function SceneCollection({
+  title,
+  empty,
+  children,
+}: {
+  readonly title: string;
+  readonly empty: string;
+  readonly children: ReadonlyArray<ReactNode>;
+}) {
+  return (
+    <div>
+      <p className="font-medium">{title}</p>
+      {children.length > 0
+        ? <div className="mt-2 grid gap-3 lg:grid-cols-2">{children}</div>
+        : <p className="mt-2 text-xs text-muted-foreground">{empty}</p>}
+    </div>
+  );
+}
+
 function SpecPanel(props: PanelProps) {
   const { data } = props;
+  const [readerContractDraft, setReaderContractDraft] = useState<ReaderContractDraft>(() =>
+    readerContractToDraft(data.readerContract));
+  useEffect(() => {
+    setReaderContractDraft(readerContractToDraft(data.readerContract));
+  }, [data.readerContract.version]);
   return (
     <section className="space-y-5">
+      <div className="rounded-xl border border-border bg-card">
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div>
+            <h2 className="text-xl">Reader Contract</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              正式写作前必须明确七类长期承诺；空合同只能用于开书准备，不会进入 Writer。
+            </p>
+          </div>
+          <StatusBadge value={data.readerContract.ready ? "ready" : "incomplete"} />
+        </header>
+        <div className="grid gap-4 p-5 lg:grid-cols-2">
+          {READER_CONTRACT_FIELDS.map((field) => (
+            <label key={field.key} className={field.key === "forbiddenBetrayals" ? "lg:col-span-2" : ""}>
+              <span className="flex items-center justify-between gap-3 text-sm font-medium">
+                {field.label}
+                {data.readerContract.missingSections.includes(field.key) && (
+                  <span className="text-xs text-amber-700 dark:text-amber-300">必填</span>
+                )}
+              </span>
+              <span className="mt-1 block text-xs text-muted-foreground">{field.hint}；每行一项。</span>
+              <textarea
+                value={readerContractDraft[field.key]}
+                onChange={(event) => setReaderContractDraft((current) => ({
+                  ...current,
+                  [field.key]: event.target.value,
+                }))}
+                rows={3}
+                className="mt-2 min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+              />
+            </label>
+          ))}
+        </div>
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-4">
+          <p className="text-xs text-muted-foreground">
+            v{data.readerContract.version} · {data.readerContract.ready
+              ? "七类承诺已齐全，可以编译正式 Chapter Spec。"
+              : `仍缺 ${data.readerContract.missingSections.length} 类承诺，保存后仍会保持写作阻断。`}
+          </p>
+          <ActionButton
+            busy={props.busy === "reader-contract:save"}
+            onClick={() => props.act(
+              "reader-contract:save",
+              () => putApi(`${props.path}/reader-contract`, readerContractFromDraft(readerContractDraft)),
+              "Reader Contract 已保存；写章前会重新验证完整性。",
+            )}
+          >
+            <Check size={14} /> 保存 Reader Contract
+          </ActionButton>
+        </footer>
+      </div>
       <div>
         <h2 className="text-xl">Story Constitution</h2>
         <details className="mt-3 rounded-xl border border-border bg-card">
@@ -666,6 +916,80 @@ function SpecPanel(props: PanelProps) {
                 <List values={spec.hardConstraints} empty="无额外硬约束" />
                 <p className="mt-4 font-medium">Required Beats</p>
                 <List values={spec.requiredBeats} empty="本章没有人工指定的 hard beat" mono />
+                {spec.sceneRealization && (
+                  <div className="mt-5 space-y-4">
+                    <div>
+                      <p className="font-medium">Human Scene Realization</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Writer 将按以下场景逐个生成、语义审查和局部重构，不会自由扩写整章。
+                      </p>
+                    </div>
+                    {spec.sceneRealization.scenes.map((scene) => (
+                      <details key={scene.plan.id} className="rounded-lg border border-border bg-card">
+                        <summary className="flex items-center gap-3 px-3 py-3">
+                          <span className="font-mono text-xs text-muted-foreground">S{scene.plan.order}</span>
+                          <span className="min-w-0 flex-1 truncate font-medium">
+                            {scene.plan.location} · {scene.plan.immediateGoal}
+                          </span>
+                          <StatusBadge value={scene.plan.status} />
+                        </summary>
+                        <div className="space-y-5 border-t border-border px-4 py-4">
+                          <dl className="grid gap-3 sm:grid-cols-2">
+                            <SceneValue label="时间" value={scene.plan.time} />
+                            <SceneValue label="风险" value={scene.plan.stakes} />
+                            <SceneValue label="阻力目标" value={scene.plan.oppositionGoal} />
+                            <SceneValue label="转折" value={scene.plan.turningPoint} />
+                            <SceneValue label="抉择" value={scene.plan.decisionPoint} />
+                            <SceneValue label="不可逆变化" value={scene.plan.irreversibleChange} />
+                          </dl>
+                          <SceneCollection title="人物议程" empty="无人物议程">
+                            {scene.characterAgendas.map((agenda) => (
+                              <div key={agenda.characterId} className="rounded-md border border-border px-3 py-3">
+                                <p className="font-medium">{agenda.characterId}</p>
+                                <p className="mt-2 text-xs leading-5 text-muted-foreground">想要：{agenda.wantsNow}</p>
+                                <p className="text-xs leading-5 text-muted-foreground">害怕：{agenda.fearsNow}</p>
+                                <p className="text-xs leading-5 text-muted-foreground">策略：{agenda.tactic}</p>
+                                <p className="text-xs leading-5 text-muted-foreground">隐藏：{agenda.hides.join("、") || "无"}</p>
+                                <p className="text-xs leading-5 text-muted-foreground">不能直说：{agenda.cannotSayDirectly.join("、") || "无"}</p>
+                              </div>
+                            ))}
+                          </SceneCollection>
+                          <SceneCollection title="信息传递" empty="本场无必须传递信息">
+                            {scene.informationUnits.map((unit) => (
+                              <div key={unit.id} className="rounded-md border border-border px-3 py-3">
+                                <p className="font-medium">{unit.fact}</p>
+                                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                                  承载：{unit.selectedCarriers.join(" + ")} · {unit.deliveryMethod}
+                                </p>
+                                <p className="text-xs leading-5 text-muted-foreground">后果：{unit.consequence}</p>
+                                <p className="text-xs leading-5 text-muted-foreground">旁白：{unit.narrationAllowed ? "已申请许可" : "禁止"}</p>
+                              </div>
+                            ))}
+                          </SceneCollection>
+                          <SceneCollection title="逐轮互动链" empty="无互动轮次">
+                            {scene.interactionTurns.map((turn) => (
+                              <div key={turn.order} className="rounded-md border border-border px-3 py-3 text-xs leading-5">
+                                <p className="font-medium">#{turn.order} {turn.initiator} → {turn.responder}</p>
+                                <p className="mt-1 text-muted-foreground">刺激：{turn.stimulus}</p>
+                                <p className="text-muted-foreground">回应：{turn.outwardActionOrDialogue}</p>
+                                <p className="text-muted-foreground">策略变化：{turn.strategyAfter}</p>
+                                <p className="text-muted-foreground">对方受到影响：{turn.effectOnOtherCharacter}</p>
+                              </div>
+                            ))}
+                          </SceneCollection>
+                          <SceneCollection title="旁白许可" empty="本场没有旁白许可；解释性旁白一律禁止">
+                            {scene.narrationPermissions.map((permission) => (
+                              <div key={permission.informationUnitId} className="rounded-md border border-border px-3 py-3 text-xs leading-5">
+                                <p className="font-medium">{permission.reason} · 最多 {permission.maximumChars} 字</p>
+                                <p className="mt-1 text-muted-foreground">仅允许：{permission.requiredContent}</p>
+                              </div>
+                            ))}
+                          </SceneCollection>
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                )}
                 {spec.planningValidation.verdict === "block" && (
                   <div className="mt-4 rounded-lg border border-amber-500/35 bg-amber-500/[0.07] p-3">
                     <p className="flex items-center gap-2 font-medium text-amber-800 dark:text-amber-200">

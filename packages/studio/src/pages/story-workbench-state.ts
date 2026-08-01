@@ -1,6 +1,7 @@
-export type WorkbenchDestination = "book" | "outline" | "quality" | "canon" | "system";
+export type WorkbenchDestination = "book" | "spec" | "outline" | "quality" | "canon" | "system";
 
 export interface WorkbenchReportSummary {
+  readonly chapter?: number;
   readonly score?: number;
   readonly blockingCount?: number;
   readonly finalStatus?: string;
@@ -63,6 +64,9 @@ export function deriveWorkbenchOverviewState(input: {
    */
   readonly proseReports: ReadonlyArray<WorkbenchReportSummary>;
   readonly humanReports: ReadonlyArray<WorkbenchReportSummary>;
+  readonly readerContractReady?: boolean;
+  readonly pendingSpecCount?: number;
+  readonly pendingChapterApprovals?: ReadonlyArray<{ readonly chapter: number; readonly status: string }>;
 }): WorkbenchOverviewState {
   const latestProse = input.proseReports[0];
   const latestHuman = input.humanReports[0];
@@ -79,6 +83,10 @@ export function deriveWorkbenchOverviewState(input: {
   );
   const qualityBlocked = proseBlocked || humanBlocked;
   const qualityIncomplete = hasAnyQualityReport && !hasCompleteQualityReport;
+  const latestQualityChapter = Math.max(latestProse?.chapter ?? 0, latestHuman?.chapter ?? 0);
+  const qualityRequiresAction = latestQualityChapter === 0
+    ? hasAnyQualityReport
+    : latestQualityChapter > (input.storyHeadChapter ?? 0);
   const legacyHistoryNeedsMigration = input.storyPreflightErrors.some((error) =>
     error.startsWith("legacy-history-unmigrated:"));
   const qualityState = !hasAnyQualityReport
@@ -96,6 +104,22 @@ export function deriveWorkbenchOverviewState(input: {
       destination: "system",
       requiresAttention: true,
     };
+  } else if (input.readerContractReady === false) {
+    nextAction = {
+      title: "完成 Reader Contract",
+      description: "正式写作要求核心幻想、情绪、成长、关系、谜团、身份与禁止背叛事项全部明确。",
+      buttonLabel: "填写读者合同",
+      destination: "spec",
+      requiresAttention: true,
+    };
+  } else if ((input.pendingSpecCount ?? 0) > 0) {
+    nextAction = {
+      title: "审阅具体场景规格",
+      description: `${input.pendingSpecCount} 个 Chapter Spec 等待人工批准；请核对人物议程、互动链与旁白许可。`,
+      buttonLabel: "查看并批准规格",
+      destination: "spec",
+      requiresAttention: true,
+    };
   } else if (input.pendingOutlineCount > 0) {
     nextAction = {
       title: "处理动态大纲提案",
@@ -104,7 +128,18 @@ export function deriveWorkbenchOverviewState(input: {
       destination: "outline",
       requiresAttention: true,
     };
-  } else if (qualityBlocked || qualityIncomplete) {
+  } else if ((input.pendingChapterApprovals?.length ?? 0) > 0) {
+    const pending = input.pendingChapterApprovals![0]!;
+    nextAction = {
+      title: pending.status === "human-editing" ? `重新审查第 ${pending.chapter} 章修改` : `批准第 ${pending.chapter} 章正文`,
+      description: pending.status === "human-editing"
+        ? "正文在审查后被修改，旧批准已失效；请重新运行审查后再批准。"
+        : "自动质量门已经完成，accepted ChapterCommit 正等待作者核对并批准当前正文哈希。",
+      buttonLabel: "打开待批准正文",
+      destination: "book",
+      requiresAttention: true,
+    };
+  } else if (qualityRequiresAction && (qualityBlocked || qualityIncomplete)) {
     nextAction = {
       title: qualityBlocked ? "处理正文质量阻断" : "检查未完成的质量审查",
       description: qualityBlocked
