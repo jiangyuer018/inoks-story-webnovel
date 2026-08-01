@@ -23,6 +23,9 @@ export const STORY_SYSTEM_SCHEMA_VERSION = "inoks-story-story-system/v1";
 
 const LEGACY_EXTENDED_VALIDATION_KEYS = [
   "storyConvergencePassed",
+  "sceneRealizationPassed",
+  "informationDramatizationPassed",
+  "interactionChainPassed",
   "humanFeelPassed",
   "emotionPassed",
   "payoffPassed",
@@ -89,6 +92,9 @@ export function buildChapterCommit(params: {
   readonly extendedValidation?: Partial<Pick<
     ChapterCommit["validation"],
     | "storyConvergencePassed"
+    | "sceneRealizationPassed"
+    | "informationDramatizationPassed"
+    | "interactionChainPassed"
     | "humanFeelPassed"
     | "emotionPassed"
     | "payoffPassed"
@@ -148,6 +154,9 @@ export function buildChapterCommit(params: {
     disambiguationPassed,
     blockingCount: params.blockingCount,
     storyConvergencePassed: params.extendedValidation?.storyConvergencePassed === true,
+    sceneRealizationPassed: params.extendedValidation?.sceneRealizationPassed === true,
+    informationDramatizationPassed: params.extendedValidation?.informationDramatizationPassed === true,
+    interactionChainPassed: params.extendedValidation?.interactionChainPassed === true,
     humanFeelPassed: params.extendedValidation?.humanFeelPassed === true,
     emotionPassed: params.extendedValidation?.emotionPassed === true,
     payoffPassed: params.extendedValidation?.payoffPassed === true,
@@ -161,6 +170,9 @@ export function buildChapterCommit(params: {
     && validation.fulfillmentPassed
     && validation.disambiguationPassed
     && validation.storyConvergencePassed === true
+    && validation.sceneRealizationPassed === true
+    && validation.informationDramatizationPassed === true
+    && validation.interactionChainPassed === true
     && validation.humanFeelPassed === true
     && validation.emotionPassed === true
     && validation.payoffPassed === true
@@ -219,6 +231,9 @@ export function validationPassedExceptHumanApproval(validation: CommitValidation
     && validation.fulfillmentPassed === true
     && validation.disambiguationPassed === true
     && validation.storyConvergencePassed === true
+    && validation.sceneRealizationPassed === true
+    && validation.informationDramatizationPassed === true
+    && validation.interactionChainPassed === true
     && validation.humanFeelPassed === true
     && validation.emotionPassed === true
     && validation.payoffPassed === true

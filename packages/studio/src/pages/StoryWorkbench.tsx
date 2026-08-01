@@ -193,6 +193,7 @@ interface StoryWorkbenchData {
   };
   readonly quality: {
     readonly prose: ReadonlyArray<QualityReport>;
+    readonly "scene-semantic": ReadonlyArray<SceneSemanticReport>;
     readonly "human-feel": ReadonlyArray<HumanFeelReport>;
     readonly payoff: ReadonlyArray<QualityReport>;
   };
@@ -577,6 +578,27 @@ function CanonPanel(props: PanelProps) {
       </div>
     </section>
   );
+}
+
+interface SceneSemanticReport extends QualityReport {
+  readonly contentChangedAfterSceneReview?: boolean;
+  readonly sceneCount?: number;
+  readonly sceneRealizationPassed?: boolean;
+  readonly informationDramatizationPassed?: boolean;
+  readonly interactionChainPassed?: boolean;
+  readonly reviews?: ReadonlyArray<{
+    readonly sceneId: string;
+    readonly repairIterations: number;
+    readonly review: {
+      readonly verdict: "pass" | "repair" | "block";
+      readonly narrationUnits: ReadonlyArray<{ readonly necessary: boolean; readonly permissionMatched: boolean; readonly excerpt: string }>;
+      readonly dialogueTurns: ReadonlyArray<{ readonly respondsToPreviousTurn: boolean; readonly changesInteraction: boolean; readonly informationDump: boolean; readonly excerpt: string }>;
+      readonly informationFulfillment: ReadonlyArray<{ readonly delivered: boolean; readonly consequenceVisible: boolean }>;
+      readonly interactionFulfillment: ReadonlyArray<{ readonly fulfilled: boolean; readonly missingParts: ReadonlyArray<string> }>;
+      readonly unintendedFacts: ReadonlyArray<{ readonly message: string; readonly excerpt: string }>;
+      readonly missingDramatization: ReadonlyArray<{ readonly message: string; readonly excerpt: string }>;
+    };
+  }>;
 }
 
 type ReaderContractField =
@@ -1145,6 +1167,7 @@ function BenchmarkPanel(props: PanelProps) {
 
 function QualityPanel(props: PanelProps) {
   const latestHuman = props.data.quality["human-feel"][0];
+  const latestScene = props.data.quality["scene-semantic"][0];
   const humanIssues = useMemo(() => collectHumanIssues(latestHuman), [latestHuman]);
   const humanChapter = reportChapter(latestHuman);
   return (
@@ -1155,8 +1178,46 @@ function QualityPanel(props: PanelProps) {
       </div>
       <div className="flex flex-wrap gap-3">
         <QualitySummary label="Prose Quality" report={props.data.quality.prose[0]} />
+        <QualitySummary label="Scene Semantic" report={latestScene} />
         <QualitySummary label="Human Feel" report={latestHuman} />
         <QualitySummary label="Payoff" report={props.data.quality.payoff[0]} />
+      </div>
+      <div>
+        <h3 className="text-lg">场景语义审查</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          分别验证场景状态变化、信息戏剧化和刺激—反应互动链；三项全部通过才允许进入正史提交。
+        </p>
+        <div className="mt-3 divide-y divide-border rounded-xl border border-border bg-card">
+          {!latestScene?.reviews?.length && <Empty text="尚无逐场景语义报告。" />}
+          {latestScene?.reviews?.map((record) => {
+            const narrationFailures = record.review.narrationUnits.filter((unit) => !unit.necessary || !unit.permissionMatched);
+            const dialogueFailures = record.review.dialogueTurns.filter((turn) => !turn.respondsToPreviousTurn || !turn.changesInteraction || turn.informationDump);
+            const missingInformation = record.review.informationFulfillment.filter((item) => !item.delivered || !item.consequenceVisible);
+            const missingTurns = record.review.interactionFulfillment.filter((item) => !item.fulfilled || item.missingParts.length > 0);
+            const issues = [
+              ...record.review.unintendedFacts.map((issue) => `意外事实：${issue.message}｜${issue.excerpt}`),
+              ...record.review.missingDramatization.map((issue) => `未戏剧化：${issue.message}｜${issue.excerpt}`),
+              ...narrationFailures.map((unit) => `旁白无许可或无必要：${unit.excerpt}`),
+              ...dialogueFailures.map((turn) => `对白未形成刺激—反应：${turn.excerpt}`),
+              ...missingInformation.map(() => "必要信息未完整交付或没有可见后果"),
+              ...missingTurns.map((turn) => `互动轮缺失：${turn.missingParts.join("、") || "未兑现"}`),
+            ];
+            return (
+              <details key={record.sceneId} className="group">
+                <summary className="flex items-center gap-3 px-4 py-3">
+                  <code className="text-xs text-muted-foreground">{record.sceneId}</code>
+                  <span className="min-w-0 flex-1 text-sm">
+                    {record.repairIterations > 0 ? `自动重构 ${record.repairIterations} 轮` : "未触发重构"}
+                  </span>
+                  <StatusBadge value={record.review.verdict} />
+                </summary>
+                <div className="border-t border-border bg-secondary/20 px-4 py-4">
+                  <List values={issues} empty="场景语义、信息承载和互动链均已兑现。" />
+                </div>
+              </details>
+            );
+          })}
+        </div>
       </div>
       <div>
         <h3 className="text-lg">真人感问题定位</h3>

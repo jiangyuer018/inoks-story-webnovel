@@ -38,7 +38,12 @@ import {
 } from "../utils/governed-working-set.js";
 import { extractPOVFromOutline, filterMatrixByPOV, filterHooksByPOV } from "../utils/pov-filter.js";
 import { parseCreativeOutput, type CreativeOutput } from "./writer-parser.js";
-import type { RealizedScene, SceneRealizationBundle, SemanticSceneReview } from "../scene-realization/types.js";
+import type {
+  RealizedScene,
+  SceneRealizationBundle,
+  SceneSemanticReviewRecord,
+  SemanticSceneReview,
+} from "../scene-realization/types.js";
 import {
   HumanSceneRepairAgent,
   SceneSemanticGateError,
@@ -122,7 +127,7 @@ function addTokenUsage(
   target.totalTokens += usage.totalTokens;
 }
 
-function normalizeSemanticReview(scene: RealizedScene, review: SemanticSceneReview): SemanticSceneReview {
+export function normalizeSemanticReview(scene: RealizedScene, review: SemanticSceneReview): SemanticSceneReview {
   const hasHardFailure = !review.entryExitStateMatch
     || review.unintendedFacts.some((issue) => issue.severity === "blocking")
     || review.dialogueTurns.some((turn) => turn.violatesKnowledgeBoundary);
@@ -249,6 +254,7 @@ export interface WriteChapterOutput {
     readonly description: string;
     readonly suggestion: string;
   }>;
+  readonly semanticSceneReviews?: ReadonlyArray<SceneSemanticReviewRecord>;
   readonly tokenUsage?: TokenUsage;
 }
 
@@ -617,6 +623,7 @@ export class WriterAgent extends BaseAgent {
       postWriteErrors,
       postWriteWarnings,
       hookHealthIssues,
+      semanticSceneReviews: realizedWriting?.sceneReviews,
       tokenUsage,
     };
   }
@@ -629,13 +636,18 @@ export class WriterAgent extends BaseAgent {
     readonly chapterNumber: number;
     readonly temperature: number;
     readonly countingMode: LengthSpec["countingMode"];
-  }): Promise<{ readonly creative: CreativeOutput; readonly usage: TokenUsage }> {
+  }): Promise<{
+    readonly creative: CreativeOutput;
+    readonly usage: TokenUsage;
+    readonly sceneReviews: ReadonlyArray<SceneSemanticReviewRecord>;
+  }> {
     const usage: { promptTokens: number; completionTokens: number; totalTokens: number } = {
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
     };
     const completed: string[] = [];
+    const sceneReviews: SceneSemanticReviewRecord[] = [];
     const reviewer = new SemanticSceneReviewerAgent(this.ctx);
     const repairer = new HumanSceneRepairAgent(this.ctx);
     const budgetByEvent = new Map(
@@ -699,7 +711,9 @@ export class WriterAgent extends BaseAgent {
         throw new SceneSemanticGateError(scene.plan.id, review);
       }
 
+      let repairIterations = 0;
       for (let iteration = 0; review.verdict === "repair" && iteration < 2; iteration += 1) {
+        repairIterations = iteration + 1;
         const repaired = await repairer.repair({
           originalScene: prose,
           scenePlan: scene.plan,
@@ -730,6 +744,12 @@ export class WriterAgent extends BaseAgent {
         throw new SceneSemanticGateError(scene.plan.id, review);
       }
       completed.push(prose);
+      sceneReviews.push({
+        sceneId: scene.plan.id,
+        content: prose,
+        review,
+        repairIterations,
+      });
     }
 
     const content = completed.join("\n\n");
@@ -745,6 +765,7 @@ export class WriterAgent extends BaseAgent {
           .join("\n"),
       },
       usage,
+      sceneReviews,
     };
   }
 

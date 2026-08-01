@@ -53,6 +53,9 @@ describe("ChapterCommit", () => {
     const commit = buildCommit(root, { extendedValidation: {} });
     expect(commit.status).toBe("rejected");
     expect(commit.validation.storyConvergencePassed).toBe(false);
+    expect(commit.validation.sceneRealizationPassed).toBe(false);
+    expect(commit.validation.informationDramatizationPassed).toBe(false);
+    expect(commit.validation.interactionChainPassed).toBe(false);
     expect(commit.validation.humanFeelPassed).toBe(false);
     expect(commit.validation.temporalPassed).toBe(false);
     expect(commit.validation.humanApprovalPassed).toBe(false);
@@ -71,6 +74,9 @@ describe("ChapterCommit", () => {
     const legacy = JSON.parse(await readFile(path, "utf-8")) as Record<string, any>;
     for (const key of [
       "storyConvergencePassed",
+      "sceneRealizationPassed",
+      "informationDramatizationPassed",
+      "interactionChainPassed",
       "humanFeelPassed",
       "emotionPassed",
       "payoffPassed",
@@ -494,6 +500,9 @@ function buildCommit(
 function allExtendedGatesPassed() {
   return {
     storyConvergencePassed: true,
+    sceneRealizationPassed: true,
+    informationDramatizationPassed: true,
+    interactionChainPassed: true,
     humanFeelPassed: true,
     emotionPassed: true,
     payoffPassed: true,

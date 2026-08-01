@@ -6961,7 +6961,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
 
 async function listWorkbenchQuality(bookDir: string): Promise<Record<string, ReadonlyArray<unknown>>> {
   const result: Record<string, ReadonlyArray<unknown>> = {};
-  for (const area of ["prose", "human-feel", "payoff"] as const) {
+  for (const area of ["prose", "scene-semantic", "human-feel", "payoff"] as const) {
     const dir = join(bookDir, "quality", area);
     const names = (await readdir(dir).catch(() => []))
       .filter((name) => /^chapter-\d+\.json$/.test(name))

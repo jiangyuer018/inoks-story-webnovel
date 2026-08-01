@@ -38,6 +38,7 @@ describe("Story workbench API", () => {
       specs: unknown[];
       automation: { config: { enabled: boolean }; runtime: { paused: boolean } };
       publications: unknown[];
+      quality: { "scene-semantic": unknown[] };
       storyPreflight: { passed: boolean; errors: unknown[] };
     };
     expect(body.constitution).toContain("正史唯一来源");
@@ -45,6 +46,7 @@ describe("Story workbench API", () => {
     expect(body.automation.config.enabled).toBe(false);
     expect(body.automation.runtime.paused).toBe(false);
     expect(body.publications).toEqual([]);
+    expect(body.quality["scene-semantic"]).toEqual([]);
     expect(body.storyPreflight).toMatchObject({ passed: true, errors: [] });
     expect(await readFile(
       join(root, "books", "demo", ".inoks-story-webnovel", "story-spec", "constitution.md"),

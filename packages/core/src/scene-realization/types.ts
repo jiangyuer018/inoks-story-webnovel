@@ -206,6 +206,28 @@ export interface SemanticSceneReview {
   readonly verdict: "pass" | "repair" | "block";
 }
 
+export interface SceneSemanticReviewRecord {
+  readonly sceneId: string;
+  readonly content: string;
+  readonly review: SemanticSceneReview;
+  readonly repairIterations: number;
+}
+
+export interface ChapterSceneSemanticReport {
+  readonly schemaVersion: "inoks-story-scene-semantic-report/v1";
+  readonly chapter: number;
+  readonly writerContentHash: string;
+  readonly finalContentHash: string;
+  readonly contentChangedAfterSceneReview: boolean;
+  readonly sceneCount: number;
+  readonly verdict: "pass" | "block";
+  readonly sceneRealizationPassed: boolean;
+  readonly informationDramatizationPassed: boolean;
+  readonly interactionChainPassed: boolean;
+  readonly reviews: ReadonlyArray<SceneSemanticReviewRecord>;
+  readonly createdAt: string;
+}
+
 export interface SceneRepairInput {
   readonly originalScene: string;
   readonly scenePlan: RealizedScenePlan;

@@ -15,7 +15,12 @@ import { ArchitectAgent, type ArchitectOutput } from "../agents/architect.js";
 import { FoundationReviewerAgent } from "../agents/foundation-reviewer.js";
 import { PlannerAgent, type PlanChapterOutput } from "../agents/planner.js";
 import { ComposerAgent, composeGovernedChapter, contextBudgetFromClient, type ComposeChapterOutput } from "../agents/composer.js";
-import { WriterAgent, type WriteChapterInput, type WriteChapterOutput } from "../agents/writer.js";
+import {
+  WriterAgent,
+  normalizeSemanticReview,
+  type WriteChapterInput,
+  type WriteChapterOutput,
+} from "../agents/writer.js";
 import { LengthNormalizerAgent } from "../agents/length-normalizer.js";
 import { ChapterAnalyzerAgent } from "../agents/chapter-analyzer.js";
 import { ContinuityAuditor } from "../agents/continuity.js";
@@ -110,7 +115,15 @@ import {
   savePayoffAudit,
 } from "../story-craft/index.js";
 import { BenchmarkStore } from "../benchmark/index.js";
-import { SceneRealizationPlanner } from "../scene-realization/index.js";
+import {
+  SceneRealizationPlanner,
+  SemanticSceneReviewerAgent,
+  partitionFinalChapterByScene,
+  saveChapterSceneSemanticReport,
+  type ChapterSceneSemanticReport,
+  type SceneRealizationBundle,
+  type SceneSemanticReviewRecord,
+} from "../scene-realization/index.js";
 
 const SEQUENCE_LEVEL_CATEGORIES = new Set([
   "Pacing Monotony", "节奏单调",
@@ -1629,6 +1642,9 @@ export class PipelineRunner {
         blockingCount: revisionQuality.scan.blockingCount,
         extendedValidation: {
           storyConvergencePassed: originalCommit.validation.storyConvergencePassed,
+          sceneRealizationPassed: originalCommit.validation.sceneRealizationPassed,
+          informationDramatizationPassed: originalCommit.validation.informationDramatizationPassed,
+          interactionChainPassed: originalCommit.validation.interactionChainPassed,
           humanFeelPassed: auditHumanFeel(revisionQuality.content, { language: reviseLang }).verdict === "pass",
           emotionPassed: originalCommit.validation.emotionPassed,
           payoffPassed: originalCommit.validation.payoffPassed,
@@ -1849,6 +1865,9 @@ export class PipelineRunner {
         blockingCount: quality.scan.blockingCount,
         extendedValidation: {
           storyConvergencePassed: originalCommit.validation.storyConvergencePassed,
+          sceneRealizationPassed: originalCommit.validation.sceneRealizationPassed,
+          informationDramatizationPassed: originalCommit.validation.informationDramatizationPassed,
+          interactionChainPassed: originalCommit.validation.interactionChainPassed,
           humanFeelPassed: auditHumanFeel(quality.content, { language }).verdict === "pass",
           emotionPassed: originalCommit.validation.emotionPassed,
           payoffPassed: originalCommit.validation.payoffPassed,
@@ -2468,6 +2487,10 @@ export class PipelineRunner {
     let payoffReportPath: string | undefined;
     let similarityPassed = true;
     let similarityReportPath: string | undefined;
+    let sceneRealizationPassed = !(this.config.blockOnStorySpecPlaceholders ?? false);
+    let informationDramatizationPassed = sceneRealizationPassed;
+    let interactionChainPassed = sceneRealizationPassed;
+    let sceneSemanticReportPath: string | undefined;
     const compiledWritingContract = writeInput.compiledWritingContract;
     if (compiledWritingContract) {
       this.logStage(stageLanguage, {
@@ -2503,6 +2526,28 @@ export class PipelineRunner {
         chapterNumber,
         similarityReport,
       );
+      if (compiledWritingContract.chapterSpec.sceneRealization) {
+        const sceneSemantic = await this.finalizeSceneSemanticReview({
+          bookId,
+          bookDir,
+          chapterNumber,
+          language: pipelineLang,
+          finalContent,
+          writerOutput: output,
+          realization: compiledWritingContract.chapterSpec.sceneRealization,
+          surfaceEquivalent: output.semanticSceneReviews
+            ? normalizePostWriteSurface(
+                output.semanticSceneReviews.map((record) => record.content).join("\n\n"),
+                pipelineLang,
+              ) === finalContent
+            : false,
+        });
+        totalUsage = PipelineRunner.addUsage(totalUsage, sceneSemantic.tokenUsage);
+        sceneRealizationPassed = sceneSemantic.report.sceneRealizationPassed;
+        informationDramatizationPassed = sceneSemantic.report.informationDramatizationPassed;
+        interactionChainPassed = sceneSemantic.report.interactionChainPassed;
+        sceneSemanticReportPath = sceneSemantic.reportPath;
+      }
       emotionPassed = emotionAudit?.verdict !== "block";
       missingLogicPassed = !missingLogicIssues.some((issue) => issue.severity === "blocking");
       const convergence = await runStoryConvergence({
@@ -2553,6 +2598,24 @@ export class PipelineRunner {
             passed: humanFeelReport.verdict === "pass",
             blocking: true,
             details: humanFeelReport.blockingIssues.map((issue) => issue.message),
+          },
+          {
+            gate: "scene-realization",
+            passed: sceneRealizationPassed,
+            blocking: true,
+            details: sceneRealizationPassed ? [] : ["A planned scene failed final semantic realization review"],
+          },
+          {
+            gate: "information-dramatization",
+            passed: informationDramatizationPassed,
+            blocking: true,
+            details: informationDramatizationPassed ? [] : ["Required information lacks a fulfilled dramatic carrier and visible consequence"],
+          },
+          {
+            gate: "interaction-chain",
+            passed: interactionChainPassed,
+            blocking: true,
+            details: interactionChainPassed ? [] : ["A planned stimulus-response interaction turn is incomplete"],
           },
           {
             gate: "payoff",
@@ -2819,6 +2882,9 @@ export class PipelineRunner {
       blockingCount: proseQualityResult.scan.blockingCount,
       extendedValidation: {
         storyConvergencePassed,
+        sceneRealizationPassed,
+        informationDramatizationPassed,
+        interactionChainPassed,
         humanFeelPassed: humanFeelReport.verdict === "pass",
         emotionPassed,
         structurePassed: missingLogicPassed,
@@ -2862,6 +2928,9 @@ export class PipelineRunner {
         language: pipelineLang,
         proseQualityReport: relativeToBookDir(bookDir, proseQualityResult.reportPath),
         humanFeelReport: humanFeelReportPath,
+        sceneSemanticReport: sceneSemanticReportPath
+          ? relativeToBookDir(bookDir, sceneSemanticReportPath)
+          : undefined,
         payoffReport: payoffReportPath,
         similarityReport: similarityReportPath
           ? relativeToBookDir(bookDir, similarityReportPath)
@@ -3940,6 +4009,9 @@ ${matrix}`,
           blockingCount: quality.scan.blockingCount,
           extendedValidation: {
             storyConvergencePassed: true,
+            sceneRealizationPassed: true,
+            informationDramatizationPassed: true,
+            interactionChainPassed: true,
             // Import is an explicit author-controlled canon operation, not an
             // AI-generated chapter. The prose gate and continuity audit still
             // run, while human-feel is recorded as not-applicable/pass.
@@ -4085,6 +4157,66 @@ ${matrix}`,
     };
   }
 
+  private async finalizeSceneSemanticReview(params: {
+    readonly bookId: string;
+    readonly bookDir: string;
+    readonly chapterNumber: number;
+    readonly language: "zh" | "en";
+    readonly finalContent: string;
+    readonly writerOutput: WriteChapterOutput;
+    readonly realization: SceneRealizationBundle;
+    readonly surfaceEquivalent: boolean;
+  }): Promise<{
+    readonly report: ChapterSceneSemanticReport;
+    readonly reportPath: string;
+    readonly tokenUsage: TokenUsageSummary;
+  }> {
+    const writerReviews = params.writerOutput.semanticSceneReviews ?? [];
+    const writerContent = writerReviews.length > 0
+      ? writerReviews.map((record) => record.content).join("\n\n")
+      : params.writerOutput.content;
+    let reviews: ReadonlyArray<SceneSemanticReviewRecord> = writerReviews;
+    let tokenUsage: TokenUsageSummary = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+    const canReuseWriterReviews = params.surfaceEquivalent
+      && writerReviews.length === params.realization.scenes.length;
+
+    if (!canReuseWriterReviews) {
+      const parts = partitionFinalChapterByScene({
+        finalContent: params.finalContent,
+        originalScenes: writerReviews,
+      });
+      const finalReviews: SceneSemanticReviewRecord[] = [];
+      if (parts.length === params.realization.scenes.length) {
+        const reviewer = new SemanticSceneReviewerAgent(
+          this.agentCtxFor("semantic-scene-reviewer", params.bookId),
+        );
+        for (let index = 0; index < params.realization.scenes.length; index += 1) {
+          const scene = params.realization.scenes[index]!;
+          const content = parts[index]!;
+          const result = await reviewer.review({ scene, content, language: params.language });
+          tokenUsage = PipelineRunner.addUsage(tokenUsage, result.usage);
+          finalReviews.push({
+            sceneId: scene.plan.id,
+            content,
+            review: normalizeSemanticReview(scene, result.review),
+            repairIterations: writerReviews.find((record) => record.sceneId === scene.plan.id)?.repairIterations ?? 0,
+          });
+        }
+      }
+      reviews = finalReviews;
+    }
+
+    const saved = await saveChapterSceneSemanticReport({
+      bookDir: params.bookDir,
+      chapter: params.chapterNumber,
+      writerContent,
+      finalContent: params.finalContent,
+      realization: params.realization,
+      reviews,
+    });
+    return { ...saved, tokenUsage };
+  }
+
   private async buildPersistenceOutput(
     bookId: string,
     book: BookConfig,
@@ -4122,6 +4254,7 @@ ${matrix}`,
       postWriteErrors: [],
       postWriteWarnings: [],
       hookHealthIssues: output.hookHealthIssues,
+      semanticSceneReviews: output.semanticSceneReviews,
       tokenUsage: output.tokenUsage,
     };
   }

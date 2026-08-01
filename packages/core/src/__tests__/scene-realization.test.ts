@@ -9,6 +9,8 @@ import {
   SceneRealizationPlanner,
   SceneSemanticGateError,
   SemanticSceneReviewerAgent,
+  evaluateSceneSemanticReviews,
+  partitionFinalChapterByScene,
   type SceneRealizationBundle,
   type SemanticSceneReview,
 } from "../scene-realization/index.js";
@@ -159,7 +161,15 @@ async function writeRealized(agent: WriterAgent, bundle = realization()) {
       chapterNumber: number;
       temperature: number;
       countingMode: "chinese-chars";
-    }): Promise<{ creative: { content: string }; usage: { promptTokens: number; completionTokens: number; totalTokens: number } }>;
+    }): Promise<{
+      creative: { content: string };
+      usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+      sceneReviews: ReadonlyArray<{
+        sceneId: string;
+        repairIterations: number;
+        review: SemanticSceneReview;
+      }>;
+    }>;
   }).writeRealizedScenes({
     realization: bundle,
     baseSystemPrompt: "system",
@@ -249,6 +259,13 @@ describe("Human Scene Realization", () => {
     const result = await writeRealized(writer());
 
     expect(result.creative.content).toBe(repaired);
+    expect(result.sceneReviews).toEqual([
+      expect.objectContaining({
+        sceneId: "scene-0001-01",
+        repairIterations: 1,
+        review: expect.objectContaining({ verdict: "pass" }),
+      }),
+    ]);
     expect(review).toHaveBeenCalledTimes(2);
     expect(repair).toHaveBeenCalledTimes(1);
     expect(result.usage).toEqual({ promptTokens: 24, completionTokens: 28, totalTokens: 52 });
@@ -289,5 +306,45 @@ describe("Human Scene Realization", () => {
     expect(result.creative.content).toBe(prose);
     expect(repair).not.toHaveBeenCalled();
     expect(result.usage.totalTokens).toBe(14);
+  });
+
+  it("fails commit-facing semantic dimensions independently and partitions final prose deterministically", () => {
+    const bundle = realization();
+    const passingRecord = {
+      sceneId: "scene-0001-01",
+      content: "甲段。\n\n乙段。",
+      review: semanticReview("pass"),
+      repairIterations: 0,
+    } as const;
+    expect(evaluateSceneSemanticReviews({ realization: bundle, reviews: [passingRecord] })).toEqual({
+      sceneRealizationPassed: true,
+      informationDramatizationPassed: true,
+      interactionChainPassed: true,
+      verdict: "pass",
+    });
+    const brokenInformation = {
+      ...passingRecord,
+      review: semanticReview("pass", {
+        informationFulfillment: [{
+          informationUnitId: "info-1",
+          delivered: true,
+          carrierUsed: ["observation"],
+          consequenceVisible: false,
+        }],
+      }),
+    };
+    expect(evaluateSceneSemanticReviews({ realization: bundle, reviews: [brokenInformation] }))
+      .toMatchObject({ informationDramatizationPassed: false, verdict: "block" });
+
+    expect(partitionFinalChapterByScene({
+      finalContent: "第一场第一段。\n\n第一场第二段。\n\n第二场第一段。\n\n第二场第二段。",
+      originalScenes: [
+        { ...passingRecord, sceneId: "s1", content: "甲".repeat(20) },
+        { ...passingRecord, sceneId: "s2", content: "乙".repeat(20) },
+      ],
+    })).toEqual([
+      "第一场第一段。\n\n第一场第二段。",
+      "第二场第一段。\n\n第二场第二段。",
+    ]);
   });
 });

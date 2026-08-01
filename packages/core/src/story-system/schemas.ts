@@ -114,6 +114,9 @@ export const CommitValidationSchema = z.object({
   fulfillmentPassed: z.boolean(),
   disambiguationPassed: z.boolean(),
   storyConvergencePassed: z.boolean(),
+  sceneRealizationPassed: z.boolean(),
+  informationDramatizationPassed: z.boolean(),
+  interactionChainPassed: z.boolean(),
   humanFeelPassed: z.boolean(),
   emotionPassed: z.boolean(),
   payoffPassed: z.boolean(),
@@ -155,6 +158,9 @@ export const ChapterCommitSchema = z.object({
     && commit.validation.fulfillmentPassed
     && commit.validation.disambiguationPassed
     && commit.validation.storyConvergencePassed === true
+    && commit.validation.sceneRealizationPassed === true
+    && commit.validation.informationDramatizationPassed === true
+    && commit.validation.interactionChainPassed === true
     && commit.validation.humanFeelPassed === true
     && commit.validation.emotionPassed === true
     && commit.validation.payoffPassed === true

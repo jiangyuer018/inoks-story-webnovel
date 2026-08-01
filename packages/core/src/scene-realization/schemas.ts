@@ -185,3 +185,35 @@ export const SemanticSceneReviewSchema = z.object({
   missingDramatization: z.array(SceneReviewIssueSchema).default([]),
   verdict: z.enum(["pass", "repair", "block"]),
 });
+
+export const SceneSemanticReviewRecordSchema = z.object({
+  sceneId: z.string().min(1),
+  content: z.string().min(1),
+  review: SemanticSceneReviewSchema,
+  repairIterations: z.number().int().min(0).max(2),
+});
+
+export const ChapterSceneSemanticReportSchema = z.object({
+  schemaVersion: z.literal("inoks-story-scene-semantic-report/v1"),
+  chapter: z.number().int().min(1),
+  writerContentHash: z.string().length(64),
+  finalContentHash: z.string().length(64),
+  contentChangedAfterSceneReview: z.boolean(),
+  sceneCount: z.number().int().min(1),
+  verdict: z.enum(["pass", "block"]),
+  sceneRealizationPassed: z.boolean(),
+  informationDramatizationPassed: z.boolean(),
+  interactionChainPassed: z.boolean(),
+  reviews: z.array(SceneSemanticReviewRecordSchema),
+  createdAt: z.string().datetime(),
+}).superRefine((report, context) => {
+  const passed = report.sceneRealizationPassed
+    && report.informationDramatizationPassed
+    && report.interactionChainPassed;
+  if ((report.verdict === "pass") !== passed) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "semantic report verdict does not match gates" });
+  }
+  if (report.reviews.length > report.sceneCount) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "semantic report has more reviews than planned scenes" });
+  }
+});

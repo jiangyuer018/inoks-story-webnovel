@@ -58,6 +58,9 @@ export interface CommitValidation {
   readonly fulfillmentPassed: boolean;
   readonly disambiguationPassed: boolean;
   readonly storyConvergencePassed: boolean;
+  readonly sceneRealizationPassed: boolean;
+  readonly informationDramatizationPassed: boolean;
+  readonly interactionChainPassed: boolean;
   readonly humanFeelPassed: boolean;
   readonly emotionPassed: boolean;
   readonly payoffPassed: boolean;
