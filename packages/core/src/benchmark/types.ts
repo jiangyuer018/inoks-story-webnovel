@@ -57,6 +57,46 @@ export interface ChapterBenchmarkProfile {
   readonly readerExpectationAfter: ReadonlyArray<string>;
 }
 
+/**
+ * An abstract, source-text-free description of how narrative information is
+ * carried. This is the only style-learning payload that may be exposed to a
+ * Writer. It intentionally contains no excerpts, names, or source entities.
+ */
+export interface NarrativeDeliveryProfile {
+  readonly dialogueInformationRatio: number;
+  readonly actionInformationRatio: number;
+  readonly objectInformationRatio: number;
+  readonly narrationInformationRatio: number;
+  readonly averageInteractionTurns: number;
+  readonly reactionCouplingScore: number;
+  readonly thoughtToDecisionRate: number;
+  readonly functionalEnvironmentRate: number;
+  readonly explanatoryNarrationRate: number;
+  readonly commonDialogueTactics: ReadonlyArray<string>;
+  readonly commonOmissionStrategies: ReadonlyArray<string>;
+  readonly commonSceneEntryMethods: ReadonlyArray<string>;
+  readonly commonSceneExitMethods: ReadonlyArray<string>;
+}
+
+/** Stored inside the isolated benchmark profile and never rendered to Writer. */
+export interface BenchmarkStructureSignature {
+  readonly eventSequence: ReadonlyArray<string>;
+  readonly entities: ReadonlyArray<string>;
+  readonly relationships: ReadonlyArray<string>;
+  readonly sceneFunctions: ReadonlyArray<string>;
+  readonly beatSequence: ReadonlyArray<string>;
+}
+
+/** The candidate-side structure available before formal fact extraction. */
+export interface StructuredSimilarityInput {
+  readonly text: string;
+  readonly eventSequence: ReadonlyArray<string>;
+  readonly entities: ReadonlyArray<string>;
+  readonly relationships: ReadonlyArray<string>;
+  readonly sceneFunctions: ReadonlyArray<string>;
+  readonly beatSequence: ReadonlyArray<string>;
+}
+
 export interface BenchmarkProfile {
   readonly sourceId: string;
   readonly title: string;
@@ -64,6 +104,8 @@ export interface BenchmarkProfile {
   readonly roles: ReadonlyArray<BenchmarkRole>;
   readonly sourceTextHash: string;
   readonly chapterProfiles: ReadonlyArray<ChapterBenchmarkProfile>;
+  readonly deliveryProfile: NarrativeDeliveryProfile;
+  readonly structureSignature: BenchmarkStructureSignature;
   readonly openingPatterns: ReadonlyArray<string>;
   readonly pacingProfile: Readonly<Record<string, number>>;
   readonly payoffPatterns: ReadonlyArray<string>;
@@ -93,6 +135,10 @@ export interface SimilarityReport {
   readonly entitySimilarity: number;
   readonly settingSimilarity: number;
   readonly relationshipSimilarity: number;
+  readonly sceneFunctionSimilarity: number;
+  readonly beatSequenceSimilarity: number;
+  readonly structuralSimilarity: number;
+  readonly structureEvidence: ReadonlyArray<string>;
   readonly flaggedPassages: ReadonlyArray<SimilarityFlag>;
   readonly verdict: "pass" | "review" | "block";
   readonly comparedSourceIds: ReadonlyArray<string>;

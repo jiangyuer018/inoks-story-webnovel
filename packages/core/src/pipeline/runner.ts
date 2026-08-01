@@ -2577,7 +2577,28 @@ export class PipelineRunner {
         audit: payoffAudit,
       });
       const benchmarkStore = new BenchmarkStore(bookDir);
-      const similarityReport = await benchmarkStore.analyzeSimilarity(finalContent);
+      const benchmarkScenes = compiledWritingContract.chapterSpec.sceneRealization?.scenes ?? [];
+      const similarityReport = await benchmarkStore.analyzeSimilarity({
+        text: finalContent,
+        eventSequence: compiledWritingContract.chapterSpec.plannedEvents,
+        entities: [...new Set([
+          compiledWritingContract.chapterSpec.pov,
+          ...benchmarkScenes.flatMap((scene) => [
+            scene.plan.povCharacterId,
+            ...scene.plan.cast,
+          ]),
+        ].filter(Boolean))],
+        relationships: [...new Set(benchmarkScenes.flatMap((scene) => [
+          ...scene.plan.entryState.relationships,
+          ...scene.plan.exitState.relationships,
+          ...scene.characterAgendas.flatMap((agenda) => Object.keys(agenda.beliefAboutOthers)),
+        ]).filter(Boolean))],
+        sceneFunctions: benchmarkScenes.flatMap((scene) => scene.plan.narrativeFunctions),
+        beatSequence: [
+          ...compiledWritingContract.activeBeatContracts.map((beat) => beat.function),
+          ...benchmarkScenes.flatMap((scene) => scene.plan.beatIds),
+        ],
+      });
       similarityPassed = similarityReport.verdict !== "block";
       similarityReportPath = await benchmarkStore.saveSimilarityReport(
         chapterNumber,
@@ -4618,11 +4639,12 @@ ${matrix}`,
     }
     const benchmarkStore = new BenchmarkStore(params.bookDir);
     const eventGraphStore = new EventCausalGraphStore(params.bookDir);
-    const [dynamicPlotState, readerContract, payoffTargets, benchmarkGuidance] = await Promise.all([
+    const [dynamicPlotState, readerContract, payoffTargets, benchmarkGuidance, narrativeDeliveryProfiles] = await Promise.all([
       new DynamicPlotStateStore(params.bookDir).load(),
       new ReaderContractStore(params.bookDir).ensure(),
       new PayoffLedgerStore(params.bookDir).dueAt(params.chapterNumber),
       benchmarkStore.approvedMechanisms(),
+      benchmarkStore.approvedDeliveryProfiles(),
     ]);
     const realizedScenes = spec.sceneRealization?.scenes ?? [];
     const characterIds = [...new Set([
@@ -4683,6 +4705,7 @@ ${matrix}`,
       readerContract,
       payoffTargets,
       benchmarkGuidance,
+      narrativeDeliveryProfiles,
       emotionalTrajectory,
       dynamicPlotState,
       characterStates,

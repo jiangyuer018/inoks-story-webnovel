@@ -5,6 +5,7 @@ import type {
   BenchmarkProfile,
   BenchmarkRole,
   ChapterBenchmarkProfile,
+  NarrativeDeliveryProfile,
 } from "./types.js";
 import { segmentBenchmarkChapters, segmentBenchmarkScenes } from "./segmenter.js";
 
@@ -23,6 +24,7 @@ export function buildBenchmarkProfile(params: {
   const chapterProfiles = chapters.map((chapter) => profileChapter(chapter.chapterNumber, chapter.title, chapter.content));
   const prohibited = unique(params.prohibitedSourceElements ?? []);
   const mechanisms = abstractMechanisms(params.sourceId, chapterProfiles, prohibited);
+  const deliveryProfile = buildNarrativeDeliveryProfile(params.text, chapterProfiles);
   return {
     sourceId: params.sourceId,
     title: params.title,
@@ -30,6 +32,15 @@ export function buildBenchmarkProfile(params: {
     roles: unique(params.roles),
     sourceTextHash: hash(params.text),
     chapterProfiles,
+    deliveryProfile,
+    structureSignature: {
+      eventSequence: chapterProfiles.flatMap((profile) => profile.plannedOrInferredFunctions),
+      entities: unique([...prohibited, ...extractSourceEntities(params.text)]),
+      relationships: unique(params.text.match(/师徒|父子|母女|兄弟|姐妹|夫妻|主仆|敌人|盟友|同学|同事|上下级|竞争对手/g) ?? []),
+      sceneFunctions: chapterProfiles.flatMap((profile) => profile.beats.map((beat) => beat.function)),
+      beatSequence: chapterProfiles.flatMap((profile) =>
+        profile.beats.map((beat) => `${beat.function}:${beat.pressureChange}`)),
+    },
     openingPatterns: inferOpenings(chapters.map((chapter) => chapter.content)),
     pacingProfile: averageRatios(chapterProfiles),
     payoffPatterns: unique(chapterProfiles.flatMap((profile) => profile.payoff ? [profile.payoff.result] : [])),
@@ -43,6 +54,84 @@ export function buildBenchmarkProfile(params: {
     prohibitedSourceElements: prohibited,
     createdAt: new Date().toISOString(),
   };
+}
+
+function buildNarrativeDeliveryProfile(
+  text: string,
+  chapterProfiles: ReadonlyArray<ChapterBenchmarkProfile>,
+): NarrativeDeliveryProfile {
+  const sentences = text
+    .split(/(?<=[。！？!?])|\n+/u)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2 && !/^(?:#{1,3}\s*)?(?:第\s*\d+\s*章|Chapter\s+\d+)/i.test(item));
+  const counts = { dialogue: 0, action: 0, object: 0, narration: 0 };
+  for (const sentence of sentences) {
+    if (/[“"][^”"]+[”"]/.test(sentence)) counts.dialogue += 1;
+    else if (/钥匙|信|刀|剑|枪|印|令|账本|纸|门|药|手机|电脑|日志|证据|照片|戒指|箱|杯|钱|契约/.test(sentence)) counts.object += 1;
+    else if (/走|跑|抓|拿|推|退|转|抬|放|砍|挡|躲|递|接|敲|按|拆|换|抢|关|开|扔|站|坐|追|停/.test(sentence)) counts.action += 1;
+    else counts.narration += 1;
+  }
+  const denominator = Math.max(1, sentences.length);
+  const scenes = segmentBenchmarkScenes(text);
+  const dialogueTurns = scenes.map((scene) => (scene.content.match(/[“"][^”"]+[”"]/g) ?? []).length);
+  const dialogueMatches = [...text.matchAll(/[“"]([^”"]+)[”"]/g)];
+  const coupledTurns = dialogueMatches.slice(1).filter((match, index) => {
+    const previous = dialogueMatches[index]!;
+    const bridge = text.slice((previous.index ?? 0) + previous[0].length, match.index ?? 0);
+    return /问|答|回|接|打断|反问|沉默|看|听|摇头|点头|递|推|拦|退|转/.test(bridge)
+      || /你|我|他|她|它|这|那|刚才|所以|可是|但/.test(match[1] ?? "");
+  }).length;
+  const thoughtClauses = [...text.matchAll(/想到|认为|判断|意识到|明白|猜到|怀疑/g)];
+  const thoughtDecisions = thoughtClauses.filter((match) =>
+    /决定|选择|于是|便|转而|改口|停下|拒绝|答应|追|退|问|试探/.test(
+      text.slice(match.index ?? 0, (match.index ?? 0) + 90),
+    )).length;
+  const explanatory = sentences.filter((sentence) =>
+    /这(?:就|也)?意味着|这说明|也就是说|换句话说|显然|不难看出|之所以|原因(?:是|在于)|可见/.test(sentence)).length;
+  const dialogueTactics = unique([
+    /试探|反问|旁敲侧击/.test(text) ? "试探" : "",
+    /威胁|警告|最后通牒/.test(text) ? "施压" : "",
+    /隐瞒|没说|避而不答|转移话题/.test(text) ? "隐瞒与回避" : "",
+    /交换|条件|筹码|答应/.test(text) ? "交换" : "",
+    /拒绝|否认|不肯/.test(text) ? "拒绝" : "",
+  ]);
+  const omissionStrategies = unique([
+    counts.action > counts.narration ? "以行动后果替代解释" : "",
+    counts.dialogue > 0 ? "通过对话潜台词留白" : "",
+    /没有回答|没再说|话到嘴边|欲言又止/.test(text) ? "省略直接答案" : "",
+    /直到|后来|这才|随后才/.test(text) ? "延迟披露" : "",
+  ]);
+  return {
+    dialogueInformationRatio: round(counts.dialogue / denominator),
+    actionInformationRatio: round(counts.action / denominator),
+    objectInformationRatio: round(counts.object / denominator),
+    narrationInformationRatio: round(counts.narration / denominator),
+    averageInteractionTurns: round(average(dialogueTurns)),
+    reactionCouplingScore: round(coupledTurns / Math.max(1, dialogueMatches.length - 1)),
+    thoughtToDecisionRate: round(thoughtDecisions / Math.max(1, thoughtClauses.length)),
+    functionalEnvironmentRate: round(average(chapterProfiles.map((profile) => profile.functionalEnvironmentRatio))),
+    explanatoryNarrationRate: round(explanatory / denominator),
+    commonDialogueTactics: dialogueTactics,
+    commonOmissionStrategies: omissionStrategies,
+    commonSceneEntryMethods: inferOpenings(segmentBenchmarkChapters(text).map((chapter) => chapter.content)),
+    commonSceneExitMethods: unique(segmentBenchmarkChapters(text).map((chapter) => inferExitMethod(chapter.content))),
+  };
+}
+
+function inferExitMethod(content: string): string {
+  const last = content.split(/[。！？!?]/).map((item) => item.trim()).filter(Boolean).at(-1) ?? "";
+  if (/决定|选择|答应|拒绝|转身|离开|进入/.test(last)) return "人物选择收束";
+  if (/发现|证据|秘密|原来|真正/.test(last)) return "新信息改变判断";
+  if (/得到|失去|受伤|死亡|交出|拿到|亮起/.test(last)) return "现实后果收束";
+  if (/谁|什么|为何|怎么|？/.test(last)) return "未决问题收束";
+  return "状态变化收束";
+}
+
+function extractSourceEntities(text: string): string[] {
+  const names = [...text.matchAll(/([\p{Script=Han}]{2,4})(?=说|问|答|道|喊|叫|看|听|想|把|向|对|从|立刻|当众|没有争辩)/gu)]
+    .map((match) => match[1] ?? "")
+    .filter((name) => !/^(?:他们|她们|人们|众人|对方|自己|里面|街口|刚才|昨夜)$/.test(name));
+  return unique(names).slice(0, 80);
 }
 
 function profileChapter(chapterNumber: number, title: string, content: string): ChapterBenchmarkProfile {

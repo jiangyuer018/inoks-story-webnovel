@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -69,6 +69,10 @@ describe("Benchmark Engine", () => {
     expect(profile.extractedMechanisms[0]?.requiredBeats).toContain("可观察结果");
     expect(profile.extractedMechanisms[0]?.prohibitedSourceDetails).toContain("验符台");
     expect(profile.extractedMechanisms[0]?.approved).toBe(false);
+    expect(profile.deliveryProfile.dialogueInformationRatio).toBeGreaterThanOrEqual(0);
+    expect(profile.deliveryProfile.explanatoryNarrationRate).toBeGreaterThanOrEqual(0);
+    expect(profile.structureSignature.sceneFunctions.length).toBeGreaterThan(0);
+    expect(profile.structureSignature.entities).toContain("林舟");
   });
 
   it("requires explicit mechanism approval before Writer can retrieve guidance", async () => {
@@ -85,7 +89,11 @@ describe("Benchmark Engine", () => {
     expect(await store.approvedMechanisms()).toEqual([]);
     const mechanismId = profile.extractedMechanisms[0]!.id;
     await store.setMechanismApproval(profile.sourceId, mechanismId, true);
-    expect((await store.approvedMechanisms())[0]?.id).toBe(mechanismId);
+    const approved = (await store.approvedMechanisms())[0]!;
+    expect(approved.id).toBe(mechanismId);
+    expect(approved.prohibitedSourceDetails).toEqual([]);
+    expect(approved.sourceReferences[0]?.sourceId).not.toBe(profile.sourceId);
+    expect(await store.approvedDeliveryProfiles()).toEqual([profile.deliveryProfile]);
   });
 
   it("blocks copied expression while allowing source-agnostic mechanism similarity", () => {
@@ -111,6 +119,53 @@ describe("Benchmark Engine", () => {
     expect(transformed.verdict).not.toBe("block");
   });
 
+  it("compares event, scene, beat, entity and relationship structure together", () => {
+    const structured = analyzeBenchmarkSimilarity({
+      candidate: "顾遥在复盘会上拒绝认错。日志时间戳证明权限被改，客户负责人随后交还部署权限。",
+      sources: [{ sourceId: "source-1", text: sourceText }],
+      candidateEvents: ["升级冲突", "释放信息", "反转读者判断", "改变故事状态"],
+      candidateEntities: ["林舟", "顾遥"],
+      candidateRelationships: ["竞争对手"],
+      candidateSceneFunctions: ["升级冲突", "释放信息", "兑现期待"],
+      candidateBeats: ["升级冲突:压力上升", "释放信息:压力维持", "兑现期待:压力释放"],
+      sourceSignatures: {
+        "source-1": {
+          eventSequence: ["升级冲突", "释放信息", "反转读者判断", "改变故事状态"],
+          entities: ["林舟", "守门官"],
+          relationships: ["竞争对手"],
+          sceneFunctions: ["升级冲突", "释放信息", "兑现期待"],
+          beatSequence: ["升级冲突:压力上升", "释放信息:压力维持", "兑现期待:压力释放"],
+        },
+      },
+    });
+    expect(structured.plotSequenceSimilarity).toBe(1);
+    expect(structured.sceneFunctionSimilarity).toBe(1);
+    expect(structured.beatSequenceSimilarity).toBe(1);
+    expect(structured.relationshipSimilarity).toBe(1);
+    expect(structured.entitySimilarity).toBeCloseTo(1 / 3, 3);
+    expect(structured.structuralSimilarity).toBeGreaterThan(0.8);
+    expect(structured.structureEvidence).toContain("场景功能序列重合 1");
+    expect(structured.verdict).toBe("review");
+  });
+
+  it("loads legacy profiles without new delivery and structure fields", async () => {
+    const bookDir = await temporaryBook();
+    const profile = buildBenchmarkProfile({
+      sourceId: "legacy-source",
+      title: "旧版样本",
+      text: sourceText,
+      roles: ["primary"],
+      userProvidedText: true,
+    });
+    const { deliveryProfile: _delivery, structureSignature: _structure, ...legacy } = profile;
+    const sourceDir = join(bookDir, ".inoks-story-webnovel", "benchmark", "sources", profile.sourceId);
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, "profile.json"), JSON.stringify(legacy), "utf-8");
+    const loaded = await new BenchmarkStore(bookDir).loadProfile(profile.sourceId);
+    expect(loaded?.deliveryProfile.dialogueInformationRatio).toBe(0);
+    expect(loaded?.structureSignature.sceneFunctions.length).toBeGreaterThan(0);
+  });
+
   it("generates multiple differentiated candidates and carries source-detail prohibitions", () => {
     const profile = buildBenchmarkProfile({
       sourceId: "source-1",
@@ -133,7 +188,8 @@ describe("Benchmark Engine", () => {
     });
     expect(variants).toHaveLength(3);
     expect(new Set(variants.map((variant) => variant.scene)).size).toBe(3);
-    expect(variants[0]?.followUpImpact).toContain("验符台");
+    expect(variants[0]?.followUpImpact).not.toContain("验符台");
+    expect(variants[0]?.followUpImpact).toContain("来源隔离清单已启用");
   });
 
   it("keeps market scanning at public metadata and ranks candidates by tags", async () => {

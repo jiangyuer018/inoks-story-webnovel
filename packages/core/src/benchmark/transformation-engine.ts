@@ -33,7 +33,7 @@ export function generateDifferentiatedVariants(params: {
       witnessStructure: index % 2 === 0 ? "由受影响者和制度结果共同确认" : "由对手被迫改变行为确认",
       reward,
       cost,
-      followUpImpact: `兑现后改变下一阶段资源、关系或风险；不得复用来源细节：${params.mechanism.prohibitedSourceDetails.join("、") || "无"}`,
+      followUpImpact: `兑现后改变下一阶段资源、关系或风险；来源隔离清单已启用，不向生成阶段暴露具体内容`,
     };
   });
   return uniqueVariants(variants);

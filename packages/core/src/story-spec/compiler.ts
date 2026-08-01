@@ -19,7 +19,7 @@ import type {
   PsychologyState,
 } from "../narrative-research/types.js";
 import type { PayoffEntry, ReaderContract } from "../story-craft/index.js";
-import type { AbstractNarrativeMechanism } from "../benchmark/types.js";
+import type { AbstractNarrativeMechanism, NarrativeDeliveryProfile } from "../benchmark/types.js";
 import { detectStorySpecPlaceholders } from "../scene-realization/placeholder-detector.js";
 
 const PLATFORM_PROFILES: Readonly<Record<"fanqie" | "qidian", PlatformProfile>> = {
@@ -60,6 +60,7 @@ export async function compileWritingContract(params: {
   readonly readerContract?: ReaderContract;
   readonly payoffTargets?: ReadonlyArray<PayoffEntry>;
   readonly benchmarkGuidance?: ReadonlyArray<AbstractNarrativeMechanism>;
+  readonly narrativeDeliveryProfiles?: ReadonlyArray<NarrativeDeliveryProfile>;
   readonly inheritedConstraints?: Partial<StoryConstraintSet>;
   readonly proseRules?: ReadonlyArray<string>;
   readonly emotionalTrajectory?: EmotionTrajectory;
@@ -102,6 +103,7 @@ export async function compileWritingContract(params: {
     platformProfile: resolvePlatformProfile(params.platform),
     readerContract: params.readerContract ?? emptyReaderContract(compiledAt),
     benchmarkGuidance: params.benchmarkGuidance ?? [],
+    narrativeDeliveryProfiles: params.narrativeDeliveryProfiles ?? [],
     payoffTargets: params.payoffTargets ?? [],
     chapterSpec: params.chapterSpec,
     sceneContracts: params.chapterSpec.sceneContracts,
@@ -164,7 +166,13 @@ export function renderCompiledWritingContract(contract: CompiledWritingContract)
       "",
       "## Approved Benchmark Mechanisms（只迁移机制）",
       ...contract.benchmarkGuidance.map((mechanism) =>
-        `- ${mechanism.name}: ${mechanism.requiredBeats.join(" → ")}；禁止复用=${mechanism.prohibitedSourceDetails.join("、") || "任何来源专有细节"}`),
+        `- ${mechanism.name}: ${mechanism.requiredBeats.join(" → ")}；只借鉴抽象叙事功能，不复用来源表达、人物、设定或桥段`),
+    ] : []),
+    ...(contract.narrativeDeliveryProfiles.length > 0 ? [
+      "",
+      "## Narrative Delivery Profile（抽象传递参数，无来源原文）",
+      ...contract.narrativeDeliveryProfiles.map((profile, index) =>
+        `- 样本${index + 1}: 对话=${profile.dialogueInformationRatio}，行动=${profile.actionInformationRatio}，物件=${profile.objectInformationRatio}，旁白=${profile.narrationInformationRatio}，互动耦合=${profile.reactionCouplingScore}，心理→决策=${profile.thoughtToDecisionRate}，功能环境=${profile.functionalEnvironmentRate}，解释旁白=${profile.explanatoryNarrationRate}；策略=${profile.commonDialogueTactics.join("/") || "无固定策略"}；留白=${profile.commonOmissionStrategies.join("/") || "无固定模板"}`),
     ] : []),
     "",
     "## Hard Constraints",

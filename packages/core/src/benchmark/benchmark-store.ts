@@ -4,7 +4,10 @@ import { analyzeBenchmarkSimilarity } from "./similarity-guard.js";
 import type {
   AbstractNarrativeMechanism,
   BenchmarkProfile,
+  BenchmarkStructureSignature,
+  NarrativeDeliveryProfile,
   SimilarityReport,
+  StructuredSimilarityInput,
 } from "./types.js";
 
 export class BenchmarkStore {
@@ -22,7 +25,7 @@ export class BenchmarkStore {
 
   async loadProfile(sourceId: string): Promise<BenchmarkProfile | null> {
     const raw = await readFile(join(this.sourceDir(sourceId), "profile.json"), "utf-8").catch(() => "");
-    return raw ? JSON.parse(raw) as BenchmarkProfile : null;
+    return raw ? normalizeProfile(JSON.parse(raw) as BenchmarkProfile) : null;
   }
 
   async listProfiles(): Promise<ReadonlyArray<BenchmarkProfile>> {
@@ -33,7 +36,26 @@ export class BenchmarkStore {
 
   async approvedMechanisms(): Promise<ReadonlyArray<AbstractNarrativeMechanism>> {
     return (await this.listProfiles()).flatMap((profile) =>
-      profile.extractedMechanisms.filter((mechanism) => mechanism.approved));
+      profile.extractedMechanisms
+        .filter((mechanism) => mechanism.approved)
+        .map((mechanism) => ({
+          ...mechanism,
+          // Source-specific names and phrases remain in the isolated profile for
+          // post-write comparison. They are never exposed to Writer context.
+          prohibitedSourceDetails: [],
+          sourceReferences: mechanism.sourceReferences.map((reference) => ({
+            sourceId: `source-${reference.evidenceHash.slice(0, 12)}`,
+            ...(reference.chapterNumber !== undefined ? { chapterNumber: reference.chapterNumber } : {}),
+            ...(reference.sceneIndex !== undefined ? { sceneIndex: reference.sceneIndex } : {}),
+            evidenceHash: reference.evidenceHash,
+          })),
+        })));
+  }
+
+  async approvedDeliveryProfiles(): Promise<ReadonlyArray<NarrativeDeliveryProfile>> {
+    return (await this.listProfiles())
+      .filter((profile) => profile.extractedMechanisms.some((mechanism) => mechanism.approved))
+      .map((profile) => profile.deliveryProfile);
   }
 
   async setMechanismApproval(
@@ -56,13 +78,34 @@ export class BenchmarkStore {
     return next;
   }
 
-  async analyzeSimilarity(candidate: string): Promise<SimilarityReport> {
+  async analyzeSimilarity(candidate: string | StructuredSimilarityInput): Promise<SimilarityReport> {
     const profiles = await this.listProfiles();
     const sources = await Promise.all(profiles.map(async (profile) => ({
       sourceId: profile.sourceId,
       text: await this.loadSourceText(profile.sourceId),
     })));
-    return analyzeBenchmarkSimilarity({ candidate, sources });
+    const structured = typeof candidate === "string"
+      ? {
+          text: candidate,
+          eventSequence: [],
+          entities: [],
+          relationships: [],
+          sceneFunctions: [],
+          beatSequence: [],
+        }
+      : candidate;
+    return analyzeBenchmarkSimilarity({
+      candidate: structured.text,
+      sources,
+      candidateEvents: structured.eventSequence,
+      candidateEntities: structured.entities,
+      candidateRelationships: structured.relationships,
+      candidateSceneFunctions: structured.sceneFunctions,
+      candidateBeats: structured.beatSequence,
+      sourceSignatures: Object.fromEntries(
+        profiles.map((profile) => [profile.sourceId, profile.structureSignature]),
+      ),
+    });
   }
 
   async saveSimilarityReport(
@@ -86,6 +129,41 @@ export class BenchmarkStore {
     if (!/^[\p{L}\p{N}._-]+$/u.test(sourceId)) throw new Error(`Unsafe benchmark source id: ${sourceId}`);
     return join(this.root, "sources", sourceId);
   }
+}
+
+const EMPTY_DELIVERY_PROFILE: NarrativeDeliveryProfile = {
+  dialogueInformationRatio: 0,
+  actionInformationRatio: 0,
+  objectInformationRatio: 0,
+  narrationInformationRatio: 0,
+  averageInteractionTurns: 0,
+  reactionCouplingScore: 0,
+  thoughtToDecisionRate: 0,
+  functionalEnvironmentRate: 0,
+  explanatoryNarrationRate: 0,
+  commonDialogueTactics: [],
+  commonOmissionStrategies: [],
+  commonSceneEntryMethods: [],
+  commonSceneExitMethods: [],
+};
+
+function normalizeProfile(profile: BenchmarkProfile): BenchmarkProfile {
+  const legacy = profile as BenchmarkProfile & {
+    readonly deliveryProfile?: NarrativeDeliveryProfile;
+    readonly structureSignature?: BenchmarkStructureSignature;
+  };
+  return {
+    ...profile,
+    deliveryProfile: legacy.deliveryProfile ?? EMPTY_DELIVERY_PROFILE,
+    structureSignature: legacy.structureSignature ?? {
+      eventSequence: profile.chapterProfiles.flatMap((chapter) => chapter.plannedOrInferredFunctions),
+      entities: profile.prohibitedSourceElements ?? [],
+      relationships: [],
+      sceneFunctions: profile.chapterProfiles.flatMap((chapter) => chapter.beats.map((beat) => beat.function)),
+      beatSequence: profile.chapterProfiles.flatMap((chapter) =>
+        chapter.beats.map((beat) => `${beat.function}:${beat.pressureChange}`)),
+    },
+  };
 }
 
 async function writeAtomic(path: string, content: string): Promise<void> {

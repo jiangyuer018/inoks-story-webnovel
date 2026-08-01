@@ -10,6 +10,7 @@ import {
   ensureChapterSpec,
   ensureStoryConstitution,
   runStoryConvergence,
+  renderCompiledWritingContract,
 } from "../story-spec/index.js";
 import { evaluateOutlineControl } from "../narrative-research/index.js";
 
@@ -75,6 +76,63 @@ describe("Story Constitution and Fiction Spec", () => {
 
     const versions = await new StorySpecStore(bookDir).listChapterVersions(1);
     expect(versions).toHaveLength(2);
+  });
+
+  it("renders only abstract benchmark guidance and never source names or excerpts", async () => {
+    const bookDir = await temporaryBook();
+    const spec = await ensureChapterSpec({
+      bookId: "demo",
+      bookDir,
+      chapterNumber: 3,
+      intent: {
+        chapter: 3,
+        goal: "顾遥取得审计权限",
+        mustKeep: ["顾遥必须主动证明日志被篡改"],
+        mustAvoid: [],
+        styleEmphasis: [],
+      },
+      approvalMode: "automatic",
+      blockOnPlaceholders: false,
+    });
+    const compiled = await compileWritingContract({
+      bookDir,
+      platform: "tomato",
+      chapterSpec: spec,
+      benchmarkGuidance: [{
+        id: "mechanism-1",
+        name: "压力—主动选择—现实确认",
+        emotionalFunction: "延迟期待后给予现实收益",
+        readerExpectationMechanism: ["建立期待"],
+        requiredRoles: ["承压者"],
+        requiredBeats: ["阻力", "选择", "后果"],
+        expectedPayoffEffects: ["现实收益"],
+        commonFailureModes: ["只复制表面事件"],
+        prohibitedSourceDetails: ["林舟", "验符台原文例句"],
+        sourceReferences: [{ sourceId: "原书名", evidenceHash: "source-hash" }],
+        approved: true,
+      }],
+      narrativeDeliveryProfiles: [{
+        dialogueInformationRatio: 0.4,
+        actionInformationRatio: 0.3,
+        objectInformationRatio: 0.1,
+        narrationInformationRatio: 0.2,
+        averageInteractionTurns: 4,
+        reactionCouplingScore: 0.8,
+        thoughtToDecisionRate: 0.7,
+        functionalEnvironmentRate: 0.6,
+        explanatoryNarrationRate: 0.1,
+        commonDialogueTactics: ["试探"],
+        commonOmissionStrategies: ["通过对话潜台词留白"],
+        commonSceneEntryMethods: ["动作入场"],
+        commonSceneExitMethods: ["现实后果收束"],
+      }],
+    });
+    const prompt = renderCompiledWritingContract(compiled);
+    expect(prompt).toContain("Narrative Delivery Profile");
+    expect(prompt).toContain("互动耦合=0.8");
+    expect(prompt).not.toContain("林舟");
+    expect(prompt).not.toContain("验符台原文例句");
+    expect(prompt).not.toContain("原书名");
   });
 
   it("keeps machine-generated specs awaiting review and blocks placeholder approval", async () => {
