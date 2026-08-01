@@ -12,6 +12,7 @@ Inoks Story Webnovel 将这些风险拆成一条原生控制链：
 - **Prose Quality Gate**：对中文正文进行确定性扫描；只对高确定性模板化表达阻断，对密度和节奏问题给出建议。必要时才进入最多两轮的最小化自然化修订。
 - **Story Spec 与 Narrative Research**：把章节合同、事件因果、时间、情绪轨迹、缺失逻辑和读者兑现窗口转成写前约束与写后审计。
 - **Human Feel 与 Benchmark Transfer**：用场内动作、对话、选择和后果检查叙事功能；只迁移用户合法文本中的抽象机制。
+- **Human Scene Realization**：写前把场景编译为人物议程、信息承载、逐轮刺激—反应和旁白许可；Writer 逐场景实现，`repair` 必须重新语义审查为 `pass`。
 - **Story System**：以 `accepted ChapterCommit` 与规范化事件为唯一正史来源。状态、伏笔、章节摘要、MemoryDB 和检索索引全部是可重建投影。
 
 这意味着：正文未通过质量门时，不会污染人物状态、时间线、伏笔或长期记忆；投影失败时，已接受的章节提交仍会保留并可恢复。
@@ -21,11 +22,14 @@ Inoks Story Webnovel 将这些风险拆成一条原生控制链：
 ```text
 写作规划
   → 分层记忆检索
-  → Writer 生成草稿
+  → 真实场景 / 人物议程 / 信息承载 / 互动链 / 旁白许可
+  → Writer 逐场景生成与语义审查修复
+  → 整章合并
   → 长度治理
   → Prose Quality Gate
   → 连续性 / 剧情审查
-  → 事实提取与实体消歧
+  → 候选事实提取与实体消歧
+  → 人工批准（review-first / manual）
   → ChapterCommit 验证
   → 事务化提交
   → 事件日志与派生投影
@@ -108,6 +112,11 @@ inoks-story story status 我的长篇
 {
   "writing": {
     "automationMode": "review-first",
+    "storySpec": {
+      "approvalMode": "human",
+      "blockOnPlaceholders": true,
+      "requireReaderContract": true
+    },
     "proseQuality": {
       "enabled": true,
       "enforcement": "strict",
@@ -176,6 +185,9 @@ inoks-story publish import-log <book-id> --platform fanqie --file upload.log
 
 # 聚合 A-H 配对消融；自动指标不能替代人工盲评
 inoks-story eval ablation --input ablation-runs.json --output ablation-report.json
+
+# 聚合固定 30 组 A/B/C 真人场景盲评；不完整时只能报告 incomplete
+inoks-story eval scene-blind --input evaluation/blind-review/review-input.json --output evaluation/reports/scene-blind-report.json
 ```
 
 Studio 保留 inkOS 既有界面与操作方式，并把规格、动态大纲、质量、正史、自动化和发布控制作为作品内的“故事控制”入口接入。新增页面复用原有 Sidebar、Logo、主题 token、按钮、表单、弹层和排版组件。
@@ -185,6 +197,7 @@ Studio 保留 inkOS 既有界面与操作方式，并把规格、动态大纲、
 - [Story Spec](docs/architecture/story-spec-system.md)
 - [Narrative Research Layer](docs/architecture/narrative-research-layer.md)
 - [Human Feel Engine](docs/architecture/human-feel-engine.md)
+- [Human Scene Realization Engine](docs/architecture/human-scene-realization.md)
 - [Benchmark Mechanism Transfer](docs/architecture/benchmark-engine.md)
 - [ChapterCommit Story System](docs/architecture/chapter-commit-system.md)
 - [Publishing Export](docs/architecture/publishing-export.md)

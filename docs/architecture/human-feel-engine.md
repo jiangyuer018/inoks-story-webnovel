@@ -13,3 +13,7 @@ Human Feel Engine 检查“叙事是否通过人物选择与场内后果运转�
 报告写入 `quality/human-feel/chapter-XXXX.json`。人工拒绝的问题 ID 在后续审查中被过滤，锁定段落不进入自动自然化修改，但仍保留审计痕迹。
 
 Human Feel 不宣称检测“是否由 AI 写成”，也不调用外部检测器。它只报告可解释的叙事症状，并保留人工编辑的最终决定权。
+
+V3 中正则审计只是廉价预筛。正式长篇还会执行 [Human Scene Realization Engine](human-scene-realization.md)：
+逐场景检查人物议程、信息承载、刺激—反应链、旁白许可、动作后果和状态变化。语义审查的
+`repair` 不等于通过，必须修订后重新审查并得到 `pass`。

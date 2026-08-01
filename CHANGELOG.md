@@ -30,6 +30,16 @@
 - Studio 保留 inkOS 原有 Logo、Sidebar、主题和组件风格，并在每本书下新增“故事控制”入口，集中展示生产链总览、正史预检、自动化与发布控制
 - 新增 A–H 配对消融聚合器；自动指标与人工盲评分离，缺少完整人评时只输出 engineering-only 诊断
 
+### V3 真人场景与审批闭环
+
+- Writer 改为按已批准的真实场景逐场生成；场景输入包含人物议程、知识边界、信息承载、逐轮互动和旁白许可，抽象占位规划在写前阻断
+- 新增语义场景审查与受约束修复；`repair` 不视为通过，只有重新审查为 `pass` 才能进入后续质量门
+- 人工审批成为正文哈希绑定的真实状态机：编辑会使批准失效并触发完整重审，未批准草稿不进入正式章节或 accepted ChapterCommit
+- ChapterCommit 的场景实现、信息戏剧化、互动链、Human Feel、情绪、兑现、结构、相似度、时间、收敛与人工批准门全部失败关闭
+- Benchmark 新增抽象叙事传递 Profile 与事件/实体/关系/场景功能/Beat 结构相似度；来源原文、例句、专名和隔离清单不再进入 Writer
+- Runner 首批拆出 Planning、Review 与 Approval Orchestrator，保持原 API、书籍锁和唯一提交链兼容
+- 新增固定 30 组 A/B/C 真人场景盲评基架与 `eval scene-blind`；未完成真实人评时不会生成效果结论
+
 ## v1.7.1
 
 ### Release Focus

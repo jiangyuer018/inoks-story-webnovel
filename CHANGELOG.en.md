@@ -22,6 +22,16 @@
 - Routed old-chapter edits through amendment Commits; added CLI Story commands and Studio prose settings, chapter reports, Story status, and projection repair.
 - Added third-party notices preserving the oh-story MIT attribution and documenting the GPLv3 webnovel-writer design-reference boundary.
 
+### V3 Human Scene and Approval Loop
+
+- Changed formal long-form generation to approved, concrete per-scene plans with character agendas, knowledge boundaries, information carriers, interaction turns, and narration permissions.
+- Added semantic scene review and bounded repair; `repair` is never treated as passing until a new review returns `pass`.
+- Closed the hash-bound human approval loop: author edits invalidate approval and trigger the full review chain, while unapproved drafts stay outside official chapters and accepted Commits.
+- Made all new ChapterCommit scene, dramatization, interaction, Human Feel, emotion, payoff, structure, similarity, temporal, convergence, and human-approval gates fail closed.
+- Added source-isolated narrative-delivery profiles and structured event/entity/relationship/scene/Beat similarity; benchmark excerpts and proper names do not enter Writer context.
+- Extracted the first Planning, Review, and Approval orchestrators from PipelineRunner without changing its public API or lock scope.
+- Added a fixed 30-case A/B/C human scene blind-review kit and `eval scene-blind`; incomplete real human ratings cannot produce an effectiveness conclusion.
+
 ## v1.7.1
 
 ### Release Focus

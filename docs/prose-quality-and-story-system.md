@@ -5,12 +5,14 @@ Inoks Story Webnovel long-form fiction uses one finalization chain:
 ```text
 plan
 → retrieve protected/recent/historical/compressed memory
-→ generate an in-memory draft
+→ compile concrete scenes, agendas, information carriers, interactions, and narration permissions
+→ generate/review/repair scenes in memory and assemble the chapter
 → length governance
 → deterministic ProseQualityGate
 → continuity and plot review
 → final body selection
 → fact extraction and disambiguation
+→ hash-bound human approval when required
 → ChapterCommit validation
 → transactional chapter + Commit persistence
 → event/state/summary/hook/memory/retrieval projections
