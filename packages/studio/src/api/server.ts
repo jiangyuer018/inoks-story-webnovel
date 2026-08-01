@@ -2789,6 +2789,14 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     },
   ): Promise<PipelineConfig> {
     const currentConfig = overrides?.currentConfig ?? await loadCurrentProjectConfig();
+    // loadProjectConfig returns schema-validated data in production. Tests and
+    // older embedded callers can still pass pre-WritingConfig objects, so keep
+    // the same safe defaults at this boundary instead of dereferencing writing.
+    const storySpec = currentConfig.writing?.storySpec ?? {
+      approvalMode: "human" as const,
+      blockOnPlaceholders: true,
+      requireReaderContract: true,
+    };
     const projectReviewMode = readProjectChapterReviewMode(currentConfig as unknown as Record<string, unknown>);
     const chapterReviewMode = await resolveBookChapterReviewMode(root, overrides?.bookIdForSettings, projectReviewMode);
     const projectRevisionGate = readProjectRevisionGate(currentConfig as unknown as Record<string, unknown>);
@@ -2824,9 +2832,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
         || currentConfig.writing?.automationMode === "review-first"
         ? "human"
         : "automatic",
-      storySpecApprovalMode: currentConfig.writing.storySpec.approvalMode,
-      blockOnStorySpecPlaceholders: currentConfig.writing.storySpec.blockOnPlaceholders,
-      requireReaderContract: currentConfig.writing.storySpec.requireReaderContract,
+      storySpecApprovalMode: storySpec.approvalMode,
+      blockOnStorySpecPlaceholders: storySpec.blockOnPlaceholders,
+      requireReaderContract: storySpec.requireReaderContract,
       revisionGate,
       modelOverrides: currentConfig.modelOverrides,
       notifyChannels: currentConfig.notify,
