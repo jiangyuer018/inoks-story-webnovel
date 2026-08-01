@@ -1,0 +1,452 @@
+[
+  {
+    "sampleId": "scene-001",
+    "title": "城门验符",
+    "genre": "玄幻升级",
+    "chapterGoal": "林舟必须在封城前取得通行令",
+    "characters": [
+      { "id": "林舟", "wantsNow": "证明印鉴被人动过", "hides": ["他认识阵纹改法"], "doesNotKnow": ["谁反接了阵纹"] },
+      { "id": "守门官", "wantsNow": "避免为假印鉴担责", "hides": ["上级要求拖延林舟"], "doesNotKnow": ["林舟会修阵纹"] }
+    ],
+    "requiredInformation": ["印鉴阵纹被反接", "通行令只能由守门官签发"],
+    "entryState": ["林舟被拦在城外"],
+    "exitState": ["守门官当众交出通行令"],
+    "mustKeep": ["验符台重新亮起"],
+    "forbiddenChanges": ["不得揭露幕后主使"]
+  },
+  {
+    "sampleId": "scene-002",
+    "title": "急诊床位",
+    "genre": "都市现实",
+    "chapterGoal": "实习医生争取最后一张监护床",
+    "characters": [
+      { "id": "许宁", "wantsNow": "让无家属患者先入监护室", "hides": ["她误读过一次指标"], "doesNotKnow": ["主任已收到投诉"] },
+      { "id": "周主任", "wantsNow": "把床位留给术后高风险患者", "hides": ["设备故障尚未上报"], "doesNotKnow": ["患者腕带记录了过敏史"] }
+    ],
+    "requiredInformation": ["床位只有一张", "两名患者风险类型不同"],
+    "entryState": ["双方都拒绝让步"],
+    "exitState": ["腕带信息迫使主任调整分配"],
+    "mustKeep": ["决定产生可见医疗后果"],
+    "forbiddenChanges": ["不得让角色违反医学常识"]
+  },
+  {
+    "sampleId": "scene-003",
+    "title": "未干的墨",
+    "genre": "古代悬疑",
+    "chapterGoal": "女捕快在掌柜毁账前锁定伪造记录",
+    "characters": [
+      { "id": "沈砚", "wantsNow": "拿到账本原页", "hides": ["她已怀疑县丞"], "doesNotKnow": ["掌柜替谁办事"] },
+      { "id": "钱掌柜", "wantsNow": "夺回账本并拖到巡夜结束", "hides": ["墨是刚换的"], "doesNotKnow": ["沈砚带了吸墨纸"] }
+    ],
+    "requiredInformation": ["墨迹未干", "页码针孔不连续"],
+    "entryState": ["掌柜否认账本被换"],
+    "exitState": ["掌柜抢账本的动作暴露心虚并留下物证"],
+    "mustKeep": ["证据通过物件与反应呈现"],
+    "forbiddenChanges": ["不得让掌柜直接认罪"]
+  },
+  {
+    "sampleId": "scene-004",
+    "title": "融资数据室",
+    "genre": "职场商战",
+    "chapterGoal": "创始人保住尽调资格",
+    "characters": [
+      { "id": "顾遥", "wantsNow": "证明增长数据未造假", "hides": ["现金流只够两周"], "doesNotKnow": ["投资人掌握匿名举报信"] },
+      { "id": "梁澈", "wantsNow": "压低估值并逼出风险", "hides": ["他仍想投资"], "doesNotKnow": ["日志有第三方签名"] }
+    ],
+    "requiredInformation": ["报表与日志时间差", "匿名举报来自竞争对手域名"],
+    "entryState": ["尽调暂停"],
+    "exitState": ["梁澈恢复数据室权限但修改谈判条件"],
+    "mustKeep": ["双方策略至少各变化一次"],
+    "forbiddenChanges": ["不得凭空出现新融资方"]
+  },
+  {
+    "sampleId": "scene-005",
+    "title": "失控的机甲",
+    "genre": "星际军事",
+    "chapterGoal": "维修兵在交火中证明机甲指令被篡改",
+    "characters": [
+      { "id": "罗骁", "wantsNow": "切断错误指令链", "hides": ["他曾私改安全阈值"], "doesNotKnow": ["篡改来自旗舰"] },
+      { "id": "叶岚", "wantsNow": "命令机甲继续掩护撤退", "hides": ["撤退航线已泄露"], "doesNotKnow": ["安全阈值被罗骁改过"] }
+    ],
+    "requiredInformation": ["遥控指令与驾驶员输入冲突", "切断链路会失去火力"],
+    "entryState": ["机甲正误伤友军"],
+    "exitState": ["叶岚批准断链并承担防线缺口"],
+    "mustKeep": ["技术选择立刻改变战场风险"],
+    "forbiddenChanges": ["不得新增超级武器"]
+  },
+  {
+    "sampleId": "scene-006",
+    "title": "家宴座次",
+    "genre": "豪门情感",
+    "chapterGoal": "私生女迫使族长承认她的投票权",
+    "characters": [
+      { "id": "苏棠", "wantsNow": "坐上有表决权的席位", "hides": ["她握有旧遗嘱复印件"], "doesNotKnow": ["原件在谁手里"] },
+      { "id": "苏廷岳", "wantsNow": "维持继承安排", "hides": ["他见过原件"], "doesNotKnow": ["苏棠录下了席间承诺"] }
+    ],
+    "requiredInformation": ["座次对应表决权", "族长曾口头承认苏棠身份"],
+    "entryState": ["苏棠的椅子被撤走"],
+    "exitState": ["族长被自己的承诺逼得恢复席位"],
+    "mustKeep": ["冲突通过礼仪和物件推进"],
+    "forbiddenChanges": ["不得当场公开遗嘱全文"]
+  },
+  {
+    "sampleId": "scene-007",
+    "title": "直播翻车",
+    "genre": "娱乐圈",
+    "chapterGoal": "过气主播在品牌直播中拆穿错误脚本",
+    "characters": [
+      { "id": "唐栀", "wantsNow": "保住直播并拒绝虚假宣传", "hides": ["她准备退出公司"], "doesNotKnow": ["弹幕由谁控评"] },
+      { "id": "经纪人韩松", "wantsNow": "让她照稿念完", "hides": ["产品数据未审核"], "doesNotKnow": ["唐栀拿到检测报告"] }
+    ],
+    "requiredInformation": ["脚本功效数字错误", "直播不能直接中断"],
+    "entryState": ["提词器显示违规承诺"],
+    "exitState": ["唐栀用现场实验改写直播节奏并逼品牌回应"],
+    "mustKeep": ["弹幕反应改变双方策略"],
+    "forbiddenChanges": ["不得靠平台突然封禁解决"]
+  },
+  {
+    "sampleId": "scene-008",
+    "title": "宗门药库",
+    "genre": "仙侠",
+    "chapterGoal": "杂役弟子取到救师父的解毒草",
+    "characters": [
+      { "id": "阿砚", "wantsNow": "换取寒髓草", "hides": ["师父中的是禁毒"], "doesNotKnow": ["药库执事欠师父一命"] },
+      { "id": "杜执事", "wantsNow": "避免禁药流出被追责", "hides": ["他认得毒伤来源"], "doesNotKnow": ["阿砚带着师父的旧令牌"] }
+    ],
+    "requiredInformation": ["寒髓草受宗门管制", "旧令牌代表一笔人情债"],
+    "entryState": ["杜执事拒绝开库"],
+    "exitState": ["阿砚交出令牌换草并失去未来筹码"],
+    "mustKeep": ["得到资源同时支付代价"],
+    "forbiddenChanges": ["不得让师父突然痊愈"]
+  },
+  {
+    "sampleId": "scene-009",
+    "title": "雨夜修车铺",
+    "genre": "犯罪悬疑",
+    "chapterGoal": "刑警从损坏的车灯确认逃逸车辆",
+    "characters": [
+      { "id": "陈默", "wantsNow": "让修车工交出维修记录", "hides": ["他没有搜查令"], "doesNotKnow": ["嫌疑人还在后间"] },
+      { "id": "老贺", "wantsNow": "拖延到嫌疑人离开", "hides": ["车灯碎片在垃圾桶"], "doesNotKnow": ["雨水会暴露新换的灯罩"] }
+    ],
+    "requiredInformation": ["车灯刚更换", "维修记录被撕掉一页"],
+    "entryState": ["老贺声称今晚没接车"],
+    "exitState": ["陈默听见后门发动机并改变盘问策略"],
+    "mustKeep": ["雨水必须承担证据功能"],
+    "forbiddenChanges": ["不得无授权直接逮捕老贺"]
+  },
+  {
+    "sampleId": "scene-010",
+    "title": "厨房竞拍",
+    "genre": "美食经营",
+    "chapterGoal": "小店主争取最后一批稀缺食材",
+    "characters": [
+      { "id": "乔禾", "wantsNow": "用有限现金拿下青蟹", "hides": ["今晚有重要匿名食客"], "doesNotKnow": ["对手提前买通运输商"] },
+      { "id": "魏老板", "wantsNow": "抬价逼乔禾断货", "hides": ["他的冷柜坏了"], "doesNotKnow": ["乔禾知道青蟹保存时限"] }
+    ],
+    "requiredInformation": ["食材离水时间过长", "高价买下会造成损耗"],
+    "entryState": ["魏老板连续加价"],
+    "exitState": ["乔禾停止竞价并用保存条件迫使运输商分批出售"],
+    "mustKeep": ["专业判断转化为谈判行动"],
+    "forbiddenChanges": ["不得出现神奇厨具"]
+  },
+  {
+    "sampleId": "scene-011",
+    "title": "毕业答辩",
+    "genre": "校园成长",
+    "chapterGoal": "学生证明实验异常不是伪造数据",
+    "characters": [
+      { "id": "孟寻", "wantsNow": "保住答辩资格", "hides": ["她私自更换过传感器"], "doesNotKnow": ["导师已提交撤稿申请"] },
+      { "id": "评委秦教授", "wantsNow": "确认数据可复现", "hides": ["他曾否决同类课题"], "doesNotKnow": ["旧传感器仍在现场"] }
+    ],
+    "requiredInformation": ["异常只在旧传感器出现", "更换设备违反流程但未改变原始记录"],
+    "entryState": ["评委要求终止答辩"],
+    "exitState": ["现场复现实验换来附条件延期"],
+    "mustKeep": ["孟寻必须承认违规并承担后果"],
+    "forbiddenChanges": ["不得让全体评委立即赞扬她"]
+  },
+  {
+    "sampleId": "scene-012",
+    "title": "停电的婚礼",
+    "genre": "都市情感",
+    "chapterGoal": "伴娘在停电中阻止一场错误交换的婚戒",
+    "characters": [
+      { "id": "夏真", "wantsNow": "找到新娘真正的戒指", "hides": ["她怀疑新郎母亲换过盒子"], "doesNotKnow": ["新娘已发现调包"] },
+      { "id": "新郎母亲", "wantsNow": "让仪式按家族安排继续", "hides": ["真戒指刻了前任名字"], "doesNotKnow": ["停电前摄像机仍在录"] }
+    ],
+    "requiredInformation": ["两个戒盒触感不同", "摄像机有备用电池"],
+    "entryState": ["司仪催促交换戒指"],
+    "exitState": ["新娘借手电光亲自选择并改变仪式安排"],
+    "mustKeep": ["新娘是最终做选择的人"],
+    "forbiddenChanges": ["不得把冲突简化成当众掌掴"]
+  },
+  {
+    "sampleId": "scene-013",
+    "title": "副本分赃",
+    "genre": "无限流",
+    "chapterGoal": "新人争取自己发现的关键道具",
+    "characters": [
+      { "id": "陆离", "wantsNow": "留下会说谎的怀表", "hides": ["怀表提醒过他一次"], "doesNotKnow": ["队长能查看道具日志"] },
+      { "id": "队长方野", "wantsNow": "按队规集中道具", "hides": ["他准备牺牲一名新人"], "doesNotKnow": ["怀表会记录持有者谎言"] }
+    ],
+    "requiredInformation": ["队规要求集中分配", "怀表记录说谎次数"],
+    "entryState": ["方野伸手索要怀表"],
+    "exitState": ["怀表响声暴露方野的一次谎言，分配被迫公开表决"],
+    "mustKeep": ["道具规则不能改变"],
+    "forbiddenChanges": ["不得直接揭露方野完整计划"]
+  },
+  {
+    "sampleId": "scene-014",
+    "title": "被删的录音",
+    "genre": "法庭悬疑",
+    "chapterGoal": "律师在庭前会议确认关键录音被剪辑",
+    "characters": [
+      { "id": "程律", "wantsNow": "迫使证人同意重新鉴定", "hides": ["原始设备来源有程序瑕疵"], "doesNotKnow": ["证人是否参与剪辑"] },
+      { "id": "证人蒋岚", "wantsNow": "避免证词被推翻", "hides": ["她删掉的是私人争吵"], "doesNotKnow": ["波形缺口可被检测"] }
+    ],
+    "requiredInformation": ["录音存在固定长度缺口", "重新鉴定会暴露取证瑕疵"],
+    "entryState": ["双方都不愿公开原设备"],
+    "exitState": ["程律用有限披露换得共同鉴定"],
+    "mustKeep": ["双方都付出法律风险"],
+    "forbiddenChanges": ["不得当场判定案件结果"]
+  },
+  {
+    "sampleId": "scene-015",
+    "title": "矿井封门",
+    "genre": "末世求生",
+    "chapterGoal": "小队在毒气到达前决定是否封死同伴",
+    "characters": [
+      { "id": "韩灼", "wantsNow": "等失联队员返回", "hides": ["失联者是他的弟弟"], "doesNotKnow": ["氧气还剩多少"] },
+      { "id": "白芮", "wantsNow": "立刻封门保护十七人", "hides": ["她听见门外敲击"], "doesNotKnow": ["敲击是否为约定信号"] }
+    ],
+    "requiredInformation": ["毒气倒计时", "敲击节奏可能是求救信号"],
+    "entryState": ["封门杆已拉下一半"],
+    "exitState": ["两人用一次短暂开门换取确认并失去部分氧气"],
+    "mustKeep": ["环境直接限制选择"],
+    "forbiddenChanges": ["不得让毒气突然消失"]
+  },
+  {
+    "sampleId": "scene-016",
+    "title": "皇榜换字",
+    "genre": "宫廷权谋",
+    "chapterGoal": "小官在宣榜前阻止被篡改的任命",
+    "characters": [
+      { "id": "谢陵", "wantsNow": "让礼官重新核对皇榜", "hides": ["他替被换者送过信"], "doesNotKnow": ["篡改是否奉皇命"] },
+      { "id": "礼官崔慎", "wantsNow": "按时宣榜避免问责", "hides": ["印泥颜色不对"], "doesNotKnow": ["谢陵记得原榜折痕"] }
+    ],
+    "requiredInformation": ["纸上旧折痕与新字错位", "延误宣榜同样会受罚"],
+    "entryState": ["钟声将响"],
+    "exitState": ["崔慎以礼制动作暂停宣榜并扣下谢陵作证"],
+    "mustKeep": ["解决方式符合礼制权力"],
+    "forbiddenChanges": ["不得让皇帝突然出现"]
+  },
+  {
+    "sampleId": "scene-017",
+    "title": "错位的药瓶",
+    "genre": "年代家庭",
+    "chapterGoal": "长女阻止祖母误服换过标签的药",
+    "characters": [
+      { "id": "周岚", "wantsNow": "确认药瓶内容", "hides": ["她准备离家去读书"], "doesNotKnow": ["弟弟为何换标签"] },
+      { "id": "周明", "wantsNow": "掩盖自己打碎原药瓶", "hides": ["他用糖瓶代替"], "doesNotKnow": ["祖母能闻出药味"] }
+    ],
+    "requiredInformation": ["标签浆糊未干", "祖母服药时间已到"],
+    "entryState": ["祖母拧开瓶盖"],
+    "exitState": ["周明被迫承认打碎药瓶，周岚错过车次"],
+    "mustKeep": ["家庭后果与时间代价同时发生"],
+    "forbiddenChanges": ["不得把周明写成恶意下毒"]
+  },
+  {
+    "sampleId": "scene-018",
+    "title": "无人机禁飞区",
+    "genre": "科技创业",
+    "chapterGoal": "工程师在演示失败后保住救援项目",
+    "characters": [
+      { "id": "季川", "wantsNow": "证明失联源于禁飞信号", "hides": ["他关闭过冗余模块"], "doesNotKnow": ["客户临时更改了频段"] },
+      { "id": "客户代表袁清", "wantsNow": "终止高风险采购", "hides": ["频段变更未经备案"], "doesNotKnow": ["飞行日志保留了远端命令"] }
+    ],
+    "requiredInformation": ["日志显示外部频段变更", "冗余模块关闭加重了后果"],
+    "entryState": ["无人机坠落，合同将被取消"],
+    "exitState": ["双方承认各自责任并改为受限复测"],
+    "mustKeep": ["主角不能无责脱身"],
+    "forbiddenChanges": ["不得用黑客万能解释"]
+  },
+  {
+    "sampleId": "scene-019",
+    "title": "灵宠契约",
+    "genre": "御兽",
+    "chapterGoal": "少年阻止学院强制重签灵宠契约",
+    "characters": [
+      { "id": "温野", "wantsNow": "保留与灰羽的平等契约", "hides": ["灰羽能听懂全部人话"], "doesNotKnow": ["教官为何针对灰羽"] },
+      { "id": "教官秦烈", "wantsNow": "把危险灵宠纳入主从契约", "hides": ["灰羽来自禁区"], "doesNotKnow": ["灰羽已学会契约手势"] }
+    ],
+    "requiredInformation": ["新契约会抹除部分记忆", "灰羽拒绝按下爪印"],
+    "entryState": ["契约纸已铺开"],
+    "exitState": ["灰羽主动毁掉纸角，学院改为隔离观察"],
+    "mustKeep": ["灵宠必须有可观察选择"],
+    "forbiddenChanges": ["不得让灰羽突然开口说话"]
+  },
+  {
+    "sampleId": "scene-020",
+    "title": "列车最后一站",
+    "genre": "规则怪谈",
+    "chapterGoal": "乘客判断是否应在广播指定站下车",
+    "characters": [
+      { "id": "叶慈", "wantsNow": "验证广播规则真假", "hides": ["她看见过不存在的站名"], "doesNotKnow": ["检票员是否受规则控制"] },
+      { "id": "检票员", "wantsNow": "让所有人按广播下车", "hides": ["他的工牌日期停在昨天"], "doesNotKnow": ["叶慈拿到旧时刻表"] }
+    ],
+    "requiredInformation": ["广播站名与时刻表不符", "车窗外站牌顺序倒置"],
+    "entryState": ["车门即将打开"],
+    "exitState": ["叶慈用工牌日期试探检票员并决定留在车上"],
+    "mustKeep": ["规则信息通过观察和试探呈现"],
+    "forbiddenChanges": ["不得由旁白宣布正确规则"]
+  },
+  {
+    "sampleId": "scene-021",
+    "title": "失约的见证人",
+    "genre": "民国谍战",
+    "chapterGoal": "联络员确认茶馆老板是否叛变",
+    "characters": [
+      { "id": "江问", "wantsNow": "拿到撤离名单", "hides": ["备用联络点已暴露"], "doesNotKnow": ["老板是否被监视"] },
+      { "id": "卢老板", "wantsNow": "让江问立刻离开", "hides": ["名单藏在茶砖里"], "doesNotKnow": ["江问带来新的暗号"] }
+    ],
+    "requiredInformation": ["旧暗号已作废", "店内第三桌有人监听"],
+    "entryState": ["老板故意说错暗号"],
+    "exitState": ["江问通过点茶顺序确认监视并带走茶砖"],
+    "mustKeep": ["双方不能直说真实目的"],
+    "forbiddenChanges": ["不得直接爆发枪战"]
+  },
+  {
+    "sampleId": "scene-022",
+    "title": "球场换人牌",
+    "genre": "竞技体育",
+    "chapterGoal": "替补球员争取最后十分钟上场",
+    "characters": [
+      { "id": "何放", "wantsNow": "证明自己能限制对方核心", "hides": ["脚踝仍疼"], "doesNotKnow": ["教练已决定保平局"] },
+      { "id": "教练沈成", "wantsNow": "避免失球保住积分", "hides": ["首发后卫已经抽筋"], "doesNotKnow": ["何放研究过对手习惯"] }
+    ],
+    "requiredInformation": ["对手核心总从同侧突破", "首发无法继续加速"],
+    "entryState": ["换人牌写着另一名防守球员"],
+    "exitState": ["何放用场边观察说服教练，但必须隐瞒脚伤上场"],
+    "mustKeep": ["选择同时制造下一场风险"],
+    "forbiddenChanges": ["不得立刻写进球结果"]
+  },
+  {
+    "sampleId": "scene-023",
+    "title": "被退回的稿件",
+    "genre": "文娱成长",
+    "chapterGoal": "新人编辑说服作者删掉虚假高潮",
+    "characters": [
+      { "id": "许知微", "wantsNow": "让作者重写结尾而不是退稿", "hides": ["主编要求她压缩篇幅"], "doesNotKnow": ["作者经历过类似事故"] },
+      { "id": "作者老白", "wantsNow": "保留最得意的煽情段落", "hides": ["结尾借用了真实朋友"], "doesNotKnow": ["读者测试在此处大量退出"] }
+    ],
+    "requiredInformation": ["高潮没有人物选择", "测试读者在解释段退出"],
+    "entryState": ["作者准备收回全部稿件"],
+    "exitState": ["许知微用读者行为证据换得一次局部重写"],
+    "mustKeep": ["编辑建议必须落到场景功能"],
+    "forbiddenChanges": ["不得羞辱作者审美"]
+  },
+  {
+    "sampleId": "scene-024",
+    "title": "海关封条",
+    "genre": "行业悬疑",
+    "chapterGoal": "报关员阻止被调包的货柜出港",
+    "characters": [
+      { "id": "杜青", "wantsNow": "申请二次开柜", "hides": ["她漏查过一次编号"], "doesNotKnow": ["货柜内真正货物"] },
+      { "id": "码头主管", "wantsNow": "按船期放行", "hides": ["封条由下属代签"], "doesNotKnow": ["杜青拍过原封条照片"] }
+    ],
+    "requiredInformation": ["封条编号字体不同", "错过船期会产生巨额赔偿"],
+    "entryState": ["吊机已经抓起货柜"],
+    "exitState": ["杜青按下急停并用照片迫使主管共同担责开柜"],
+    "mustKeep": ["急停造成现实成本"],
+    "forbiddenChanges": ["不得提前说明货柜内是违禁品"]
+  },
+  {
+    "sampleId": "scene-025",
+    "title": "妖市赎人",
+    "genre": "东方奇幻",
+    "chapterGoal": "药师用一段记忆换回被扣的学徒",
+    "characters": [
+      { "id": "桑离", "wantsNow": "赎回学徒而不交祖传药方", "hides": ["药方最后一页是假的"], "doesNotKnow": ["学徒主动签过赌契"] },
+      { "id": "妖商鹤九", "wantsNow": "得到能转卖的稀缺之物", "hides": ["赌契缺少见证印"], "doesNotKnow": ["桑离能切取自己的记忆"] }
+    ],
+    "requiredInformation": ["妖市交易必须等价", "赌契见证印缺失"],
+    "entryState": ["鹤九只接受药方"],
+    "exitState": ["桑离用关于师父的一段记忆换人，失去辨认旧线索的能力"],
+    "mustKeep": ["代价在场内可观察"],
+    "forbiddenChanges": ["不得无代价撕毁契约"]
+  },
+  {
+    "sampleId": "scene-026",
+    "title": "病房探视单",
+    "genre": "家庭伦理",
+    "chapterGoal": "离异父亲争取见女儿十分钟",
+    "characters": [
+      { "id": "赵行", "wantsNow": "把女儿的画册送进去", "hides": ["他刚丢了工作"], "doesNotKnow": ["女儿拒绝见他"] },
+      { "id": "前妻林珊", "wantsNow": "避免女儿术前情绪波动", "hides": ["女儿一直留着旧画"], "doesNotKnow": ["赵行只打算在门外等"] }
+    ],
+    "requiredInformation": ["探视名额有限", "女儿把一张旧画压在枕下"],
+    "entryState": ["林珊不肯签探视单"],
+    "exitState": ["赵行留下画册离开，女儿从门缝看见后改变决定"],
+    "mustKeep": ["孩子的反应改变成人策略"],
+    "forbiddenChanges": ["不得强行大团圆"]
+  },
+  {
+    "sampleId": "scene-027",
+    "title": "遗迹石门",
+    "genre": "冒险探秘",
+    "chapterGoal": "考古队决定是否破坏石门救人",
+    "characters": [
+      { "id": "顾教授", "wantsNow": "保护不可逆遗迹", "hides": ["石门后的空气可能有毒"], "doesNotKnow": ["被困者伤势"] },
+      { "id": "救援队长马会", "wantsNow": "立刻爆破救出队员", "hides": ["备用氧气只够十五分钟"], "doesNotKnow": ["石门有机械泄压孔"] }
+    ],
+    "requiredInformation": ["爆破会毁掉铭文", "泄压孔可能传递绳索"],
+    "entryState": ["爆破倒计时已设置"],
+    "exitState": ["顾教授用铭文凹槽找到泄压孔，队长取消爆破但失去时间"],
+    "mustKeep": ["专业观察必须转化为救援动作"],
+    "forbiddenChanges": ["不得让遗迹机关自动救人"]
+  },
+  {
+    "sampleId": "scene-028",
+    "title": "审讯室的水杯",
+    "genre": "刑侦",
+    "chapterGoal": "审讯员验证嫌疑人的不在场证明",
+    "characters": [
+      { "id": "秦深", "wantsNow": "让嫌疑人主动修正时间线", "hides": ["监控只拍到背影"], "doesNotKnow": ["嫌疑人替谁遮掩"] },
+      { "id": "高岩", "wantsNow": "坚持自己十点离店", "hides": ["他十一点回去取过钥匙"], "doesNotKnow": ["水杯温度记录了送水时间"] }
+    ],
+    "requiredInformation": ["口供时间与水杯更换记录冲突", "监控身份尚不确定"],
+    "entryState": ["高岩重复完整口供"],
+    "exitState": ["秦深故意说错送水时间，高岩纠正后暴露回店事实"],
+    "mustKeep": ["审讯通过试探而非旁白判谎"],
+    "forbiddenChanges": ["不得刑讯或直接定罪"]
+  },
+  {
+    "sampleId": "scene-029",
+    "title": "毕业巡演名额",
+    "genre": "青春群像",
+    "chapterGoal": "乐队主唱决定由谁替代受伤吉他手",
+    "characters": [
+      { "id": "夏声", "wantsNow": "保住巡演资格和乐队完整", "hides": ["她已收到个人签约邀请"], "doesNotKnow": ["受伤吉他手想退出"] },
+      { "id": "吉他手阿树", "wantsNow": "让替补上场而不拖累大家", "hides": ["伤势需要手术"], "doesNotKnow": ["夏声可能离队"] }
+    ],
+    "requiredInformation": ["评审不允许更换曲目", "替补只会另一套编曲"],
+    "entryState": ["两人都声称原阵容能演"],
+    "exitState": ["阿树故意弹错暴露伤势，夏声选择改编并承担淘汰风险"],
+    "mustKeep": ["错误动作影响关系与策略"],
+    "forbiddenChanges": ["不得靠奇迹康复"]
+  },
+  {
+    "sampleId": "scene-030",
+    "title": "最后一班渡船",
+    "genre": "乡土悬疑",
+    "chapterGoal": "返乡记者说服船工带她去封锁的孤岛",
+    "characters": [
+      { "id": "闻溪", "wantsNow": "今晚登岛寻找失踪父亲", "hides": ["她没拿到采访许可"], "doesNotKnow": ["父亲欠船工一条命"] },
+      { "id": "船工老郭", "wantsNow": "在风暴前收船", "hides": ["他昨夜送过一名陌生人上岛"], "doesNotKnow": ["闻溪带着父亲的旧航海表"] }
+    ],
+    "requiredInformation": ["风向已改变", "旧航海表停在父亲失踪时刻"],
+    "entryState": ["老郭解开缆绳准备回家"],
+    "exitState": ["闻溪用航海表换来一次渡行，老郭改变航线避开巡逻"],
+    "mustKeep": ["天气同时提供阻力和决策依据"],
+    "forbiddenChanges": ["不得提前确认父亲生死"]
+  }
+]

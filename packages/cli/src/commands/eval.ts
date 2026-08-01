@@ -2,9 +2,14 @@ import { Command } from "commander";
 import {
   StateManager,
   AblationRunSchema,
+  BlindSceneRatingSchema,
+  SceneEvaluationCaseSchema,
+  SceneVariantArtifactSchema,
   buildAblationReport,
+  buildSceneBlindEvaluationReport,
   evaluateBookQuality,
   saveAblationReport,
+  saveSceneBlindEvaluationReport,
 } from "@inoks-story-webnovel/core";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -97,6 +102,46 @@ evalCommand
       }
     } catch (error) {
       logError(`Ablation evaluation failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
+  });
+
+evalCommand
+  .command("scene-blind")
+  .description("Aggregate the 30-case A/B/C human scene blind review")
+  .requiredOption("--input <file>", "JSON object with cases, artifacts, and ratings arrays")
+  .option("--output <file>", "Write the structured report atomically")
+  .option("--json", "Output JSON only")
+  .action(async (
+    options: { input: string; output?: string; json?: boolean },
+    command: Command,
+  ) => {
+    try {
+      const source = JSON.parse(await readFile(resolve(options.input), "utf-8")) as {
+        readonly cases?: unknown;
+        readonly artifacts?: unknown;
+        readonly ratings?: unknown;
+      };
+      const report = buildSceneBlindEvaluationReport({
+        cases: SceneEvaluationCaseSchema.array().parse(source.cases),
+        artifacts: SceneVariantArtifactSchema.array().parse(source.artifacts),
+        ratings: BlindSceneRatingSchema.array().parse(source.ratings),
+      });
+      if (options.output) await saveSceneBlindEvaluationReport(resolve(options.output), report);
+      const json = Boolean(options.json || command.optsWithGlobals().json);
+      if (json) {
+        log(JSON.stringify(report, null, 2));
+      } else {
+        log(`Scene blind review: ${report.interpretationStatus}`);
+        log(`Cases: ${report.caseCount}/30; artifacts: ${report.artifactCount}; ratings: ${report.ratingCount}`);
+        log(`Human conclusion: ${report.humanConclusion}`);
+        log(`Missing variants: ${report.diagnostics.missingVariants.length}`);
+        log(`Unrated artifacts: ${report.diagnostics.unratedArtifacts.length}`);
+        if (options.output) log(`Saved: ${resolve(options.output)}`);
+        log(report.disclaimer);
+      }
+    } catch (error) {
+      logError(`Scene blind evaluation failed: ${error instanceof Error ? error.message : String(error)}`);
       process.exitCode = 1;
     }
   });
