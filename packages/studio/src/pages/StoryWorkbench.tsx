@@ -328,6 +328,8 @@ export function StoryWorkbench({
       {tab === "overview" && (
         <OverviewPanel
           data={data}
+          busy={busy}
+          act={act}
           setTab={setTab}
           toBook={() => nav.toBook(bookId)}
         />
@@ -362,10 +364,14 @@ function HeadStatus({ data }: { readonly data: StoryWorkbenchData }) {
 
 function OverviewPanel({
   data,
+  busy,
+  act,
   setTab,
   toBook,
 }: {
   readonly data: StoryWorkbenchData;
+  readonly busy: string | null;
+  readonly act: PanelProps["act"];
   readonly setTab: (tab: Tab) => void;
   readonly toBook: () => void;
 }) {
@@ -384,6 +390,10 @@ function OverviewPanel({
     pendingChapterApprovals: data.pendingApprovals,
   });
   const { latestProse, latestHuman, nextAction } = overview;
+  const shouldPlanFirstSpec = data.readerContract.ready
+    && data.storyHead === null
+    && data.specs.length === 0
+    && data.pendingApprovals.length === 0;
   const stages = [
     {
       label: "章纲与约束",
@@ -456,22 +466,35 @@ function OverviewPanel({
             <p className="text-sm font-medium text-muted-foreground">下一步</p>
             <StatusBadge value={nextAction.requiresAttention ? "待处理" : "可继续"} />
           </div>
-          <h2 className="mt-3 font-sans text-lg font-semibold">{nextAction.title}</h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">{nextAction.description}</p>
-          <Button
+          <h2 className="mt-3 font-sans text-lg font-semibold">
+            {shouldPlanFirstSpec ? "准备第一章具体场景规格" : nextAction.title}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {shouldPlanFirstSpec
+              ? "先运行 Planner 与场景实现器，生成可审阅的角色议程、信息载体、互动链和旁白许可；不会提前生成正文。"
+              : nextAction.description}
+          </p>
+          <ActionButton
             className="mt-5 w-full"
             variant={nextAction.requiresAttention ? "default" : "outline"}
+            busy={busy === "plan-first-spec"}
             onClick={() => {
-              if (nextAction.destination === "book") {
+              if (shouldPlanFirstSpec) {
+                void act(
+                  "plan-first-spec",
+                  () => postApi(`/books/${encodeURIComponent(data.bookId)}/plan`, {}),
+                  "第一章具体场景规格已生成，请核对后批准。",
+                );
+              } else if (nextAction.destination === "book") {
                 toBook();
               } else {
                 setTab(nextAction.destination);
               }
             }}
           >
-            {nextAction.buttonLabel}
+            {shouldPlanFirstSpec ? "生成具体场景规格" : nextAction.buttonLabel}
             <ArrowRight size={15} />
-          </Button>
+          </ActionButton>
           <p className="mt-3 text-xs leading-5 text-muted-foreground">
             待批准提案、质量阻断和失败投影会暂停自动写章。
           </p>
@@ -529,6 +552,18 @@ function CanonPanel(props: PanelProps) {
                       )}
                     >
                       <ShieldCheck size={14} /> 批准并提交正史
+                    </ActionButton>
+                  )}
+                  {pending.status === "human-editing" && (
+                    <ActionButton
+                      busy={props.busy === `chapter:${pending.chapter}:review`}
+                      onClick={() => props.act(
+                        `chapter:${pending.chapter}:review`,
+                        () => postApi(`/books/${encodeURIComponent(data.bookId)}/chapters/${pending.chapter}/review`, {}),
+                        `第 ${pending.chapter} 章已重新执行全部质量门，请核对新审查哈希。`,
+                      )}
+                    >
+                      <RotateCcw size={14} /> 重新执行全部审查
                     </ActionButton>
                   )}
                 </div>

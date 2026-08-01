@@ -19,6 +19,7 @@ const reviseDraftMock = vi.fn();
 const resyncChapterArtifactsMock = vi.fn();
 const applyManualChapterAmendmentMock = vi.fn();
 const writeNextChapterMock = vi.fn();
+const reviewPendingChapterMock = vi.fn();
 const rollbackToChapterMock = vi.fn();
 const saveChapterIndexMock = vi.fn();
 const loadChapterIndexMock = vi.fn();
@@ -219,6 +220,7 @@ vi.mock("@inoks-story-webnovel/core", async (importOriginal) => {
     resyncChapterArtifacts = resyncChapterArtifactsMock;
     applyManualChapterAmendment = applyManualChapterAmendmentMock;
     writeNextChapter = writeNextChapterMock;
+    reviewPendingChapter = reviewPendingChapterMock;
   }
 
   class MockConsolidatorAgent {
@@ -426,6 +428,7 @@ describe("createStudioServer daemon lifecycle", () => {
     resyncChapterArtifactsMock.mockReset();
     applyManualChapterAmendmentMock.mockReset();
     writeNextChapterMock.mockReset();
+    reviewPendingChapterMock.mockReset();
     rollbackToChapterMock.mockReset();
     saveChapterIndexMock.mockReset();
     loadChapterIndexMock.mockReset();
@@ -493,6 +496,14 @@ describe("createStudioServer daemon lifecycle", () => {
       revised: false,
       status: "ready-for-review",
       auditResult: { passed: true, issues: [], summary: "rewritten" },
+    });
+    reviewPendingChapterMock.mockResolvedValue({
+      chapterNumber: 3,
+      title: "Rewritten Chapter",
+      wordCount: 1800,
+      revised: false,
+      status: "awaiting-human-approval",
+      auditResult: { passed: true, issues: [], summary: "re-reviewed" },
     });
     createLLMClientMock.mockReset();
     createLLMClientMock.mockReturnValue({});
@@ -4535,6 +4546,25 @@ describe("createStudioServer daemon lifecycle", () => {
     expect(pipelineConfigs.at(-1)).toEqual(expect.objectContaining({
       writingReviewRetries: 3,
     }));
+  });
+
+  it("re-runs the canonical review pipeline for an author-edited pending chapter", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/books/demo-book/chapters/3/review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      chapterNumber: 3,
+      status: "awaiting-human-approval",
+    });
+    expect(reviewPendingChapterMock).toHaveBeenCalledWith("demo-book", 3);
   });
 
   it("handles explicit chat chapter edits outside the Inoks Story Webnovel writing agent", async () => {

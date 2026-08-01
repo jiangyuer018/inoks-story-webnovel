@@ -17,6 +17,9 @@ import { ChapterAnalyzerAgent } from "../agents/chapter-analyzer.js";
 import { StateValidatorAgent } from "../agents/state-validator.js";
 import { FoundationReviewerAgent } from "../agents/foundation-reviewer.js";
 import { PolisherAgent } from "../agents/polisher.js";
+import { SceneRealizationPlanner, type SceneRealizationBundle } from "../scene-realization/index.js";
+import { ReaderContractStore } from "../story-craft/index.js";
+import { StorySpecStore } from "../story-spec/index.js";
 import type { BookConfig } from "../models/book.js";
 import type { ChapterMeta } from "../models/chapter.js";
 import { MemoryDB } from "../state/memory-db.js";
@@ -24,6 +27,7 @@ import * as memoryDbModule from "../state/memory-db.js";
 import { countChapterLength } from "../utils/length-metrics.js";
 import { migrateLegacyStorySystem } from "../story-system/migration.js";
 import {
+  ChapterApprovalStore,
   ChapterCommitStore,
   runStorySystemPreflight,
   sha256,
@@ -186,6 +190,123 @@ function createCaptureLogger() {
   };
 
   return { logger, infos, warnings };
+}
+
+function createConcreteSceneRealization(chapterNumber = 1): SceneRealizationBundle {
+  return {
+    schemaVersion: "1.0",
+    chapterNumber,
+    chapterGoal: "林越在宵禁前查明铜令缺页去了哪里",
+    scenes: [{
+      plan: {
+        id: `scene-${String(chapterNumber).padStart(4, "0")}-01`,
+        chapterNumber,
+        order: 1,
+        location: "东仓交接房",
+        time: "宵禁前一刻",
+        povCharacterId: "林越",
+        cast: ["林越", "守夜人"],
+        immediateGoal: "林越要守夜人交出昨夜交接簿的缺页",
+        oppositionGoal: "守夜人要拖到宵禁并掩住替人传递缺页的事实",
+        stakes: "宵禁后运走缺页的车会离城，铜令线索就此中断",
+        entryState: {
+          goals: ["找到缺页"],
+          relationships: ["林越不信任守夜人"],
+          risks: ["宵禁将至"],
+          resources: ["带划痕的铜令"],
+          information: ["林越不知道缺页被谁拿走"],
+        },
+        exitState: {
+          goals: ["追上东侧运货车"],
+          relationships: ["守夜人开始暗中示警"],
+          risks: ["箭楼守军注意到林越"],
+          resources: ["指向东侧箭楼的红线"],
+          information: ["林越确认缺页被送往东侧箭楼"],
+        },
+        turningPoint: "林越发现缺页断口挂着箭楼封签使用的红线",
+        decisionPoint: "林越不再追问口供，转而报出车号试探守夜人",
+        irreversibleChange: "守夜人用手势通知箭楼，林越的追查被守军察觉",
+        narrativeFunctions: ["交付铜令线索", "让追查引发可见反制"],
+        beatIds: ["beat-0001-goal"],
+        status: "generated",
+      },
+      characterAgendas: [{
+        characterId: "林越",
+        wantsNow: "在落闸前拿到缺页去向",
+        fearsNow: "铜令来历暴露后被守军扣押",
+        hides: ["铜令来自死去的驿卒"],
+        cannotSayDirectly: ["驿卒留下的内应姓名"],
+        beliefAboutOthers: { 守夜人: "他知道缺页被谁取走" },
+        tactic: "用车号和红线逐步试探守夜人的反应",
+        leverage: ["交接簿", "铜令划痕"],
+        successCondition: "确认缺页去向并离开东仓",
+        retreatCondition: "箭楼守军封住仓门",
+        knowledgeBoundary: {
+          knows: ["缺页在昨夜交接后消失"],
+          doesNotKnow: ["守夜人的接头人身份"],
+          falselyBelieves: [],
+        },
+      }, {
+        characterId: "守夜人",
+        wantsNow: "拖住林越直到宵禁落闸",
+        fearsNow: "红线暴露自己替箭楼传递缺页",
+        hides: ["缺页被送往东侧箭楼"],
+        cannotSayDirectly: ["接头守军的名字"],
+        beliefAboutOthers: { 林越: "他只看见缺页，不知道红线来源" },
+        tactic: "只回答交接簿上的表面记录并反问铜令来源",
+        leverage: ["宵禁时限", "仓门钥匙"],
+        successCondition: "林越在落闸前没有离开东仓",
+        retreatCondition: "林越当众报出正确车号",
+        knowledgeBoundary: {
+          knows: ["缺页已送往东侧箭楼"],
+          doesNotKnow: ["林越是否见过运货车"],
+          falselyBelieves: ["林越不认识箭楼封签红线"],
+        },
+      }],
+      informationUnits: [{
+        id: "info-red-thread",
+        fact: "缺页被送往东侧箭楼",
+        readerNeedsNow: true,
+        whoKnows: ["守夜人"],
+        whoDoesNotKnow: ["林越"],
+        whoWantsToHideIt: ["守夜人"],
+        possibleCarriers: ["object", "reaction", "dialogue"],
+        selectedCarriers: ["object", "reaction"],
+        deliveryMethod: "缺页断口的红线与守夜人听见箭楼车号后的停顿互相印证",
+        deliveryEvent: "林越报出车号，守夜人的手停在缺页断口",
+        consequence: "林越放弃追问，立即转向东侧箭楼追车",
+        narrationAllowed: false,
+      }],
+      interactionTurns: [{
+        order: 1,
+        initiator: "林越",
+        stimulus: "林越把铜令划痕对上缺页断口并报出运货车号",
+        responder: "守夜人",
+        immediateReaction: "守夜人的手停在红线旁并看向东侧窗户",
+        interpretation: "林越判断缺页已经送往东侧箭楼",
+        strategyBefore: "逼守夜人交出口供",
+        strategyAfter: "用错误车号确认方向后立刻追车",
+        outwardActionOrDialogue: "林越故意说错一个车号，盯着守夜人的视线落点",
+        effectOnOtherCharacter: "守夜人误以为林越尚未掌握真车号，提前向箭楼示警",
+        informationRevealed: ["缺页去向与箭楼有关"],
+        informationHidden: ["林越已经看见真正车号"],
+        stateChange: "双方都改变了下一步策略",
+      }],
+      narrationPermissions: [],
+    }],
+    concretenessPlan: [{
+      eventId: `scene-${String(chapterNumber).padStart(4, "0")}-01`,
+      importance: 0.9,
+      emotionalValue: 0.7,
+      irreversibility: 0.8,
+      plannedSceneCount: 1,
+      plannedCharBudget: 800,
+      allowedCompression: false,
+    }],
+    createdAt: "2026-08-02T00:00:00.000Z",
+    sourceHash: "scene-source-hash-0001",
+    tokenUsage: ZERO_USAGE,
+  };
 }
 
 async function createRunnerFixture(
@@ -1507,6 +1628,174 @@ describe("PipelineRunner", () => {
         headCommitId: head?.commitId,
         errors: [],
       });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("completes the default first-chapter flow through Reader Contract, concrete Spec, scene review, and human approval", async () => {
+    const { root, runner, state, bookId } = await createRunnerFixture({
+      inputGovernanceMode: "v2",
+      chapterApprovalMode: "human",
+      storySpecApprovalMode: "human",
+      blockOnStorySpecPlaceholders: true,
+      requireReaderContract: true,
+    });
+    const bookDir = state.bookDir(bookId);
+    const realization = createConcreteSceneRealization();
+    const finalBody = [
+      "林越把铜令贴上缺页断口，划痕正卡住那半截红线。",
+      "“昨夜东仓那辆七号车，去了北门？”他问。守夜人的手停在红线旁，眼睛却扫向东窗。",
+      "林越没有纠正车号。他收回铜令，转身冲出仓门。身后钥匙撞上木桌，守夜人已经朝东侧箭楼打出手势。",
+    ].join("\n\n");
+    vi.spyOn(SceneRealizationPlanner.prototype, "plan").mockResolvedValue(realization);
+    vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(createWriterOutput({
+      chapterNumber: 1,
+      title: "红线断口",
+      content: finalBody,
+      wordCount: finalBody.length,
+      semanticSceneReviews: [{
+        sceneId: realization.scenes[0]!.plan.id,
+        content: finalBody,
+        repairIterations: 0,
+        review: {
+          sceneId: realization.scenes[0]!.plan.id,
+          narrationUnits: [],
+          dialogueTurns: [],
+          actions: [],
+          thoughts: [],
+          environmentDetails: [],
+          informationFulfillment: [{
+            informationUnitId: "info-red-thread",
+            delivered: true,
+            carrierUsed: ["object", "reaction"],
+            consequenceVisible: true,
+          }],
+          interactionFulfillment: [{ turnOrder: 1, fulfilled: true, missingParts: [] }],
+          entryExitStateMatch: true,
+          unintendedFacts: [],
+          missingDramatization: [],
+          verdict: "pass",
+        },
+      }],
+    }));
+    vi.spyOn(ContinuityAuditor.prototype, "auditChapter").mockResolvedValue(createAuditResult({
+      passed: true,
+      issues: [],
+      summary: "clean",
+    }));
+    await new ReaderContractStore(bookDir).save({
+      coreFantasy: ["林越靠证据与规则撬开封闭城防"],
+      emotionalPromises: ["每次追查都引发对手的现实反制"],
+      progressionPromises: ["林越逐步掌握城防证据链"],
+      relationshipPromises: ["林越与守夜人的互相试探持续改变筹码"],
+      mysteryPromises: ["铜令缺页背后的内应链逐层揭晓"],
+      identityPromises: ["林越与旧城防档案的关系会被事实兑现"],
+      forbiddenBetrayals: ["不得让证据无因失效或让人物越过知识边界"],
+    });
+
+    try {
+      const planned = await runner.planChapter(bookId, "追查铜令缺页");
+      expect(planned.storySpecStatus).toBe("awaiting-review");
+      const specStore = new StorySpecStore(bookDir);
+      const pendingSpec = await specStore.loadChapter(1);
+      expect(pendingSpec?.sceneRealization?.scenes).toHaveLength(1);
+      expect(pendingSpec?.status).toBe("awaiting-review");
+      await specStore.approveChapter(1, {
+        expectedVersion: pendingSpec!.version,
+        approvedBy: "human",
+        blockOnPlaceholders: true,
+      });
+
+      const drafted = await runner.writeDraft(bookId, "追查铜令缺页");
+      expect(drafted.status).toBe("awaiting-human-approval");
+      expect((await readdir(join(bookDir, "chapters"))).filter((name) => name.endsWith(".md"))).toEqual([]);
+      await expect(new ChapterCommitStore(bookDir).loadHead()).resolves.toBeNull();
+      await expect(readFile(join(bookDir, "quality", "scene-semantic", "chapter-0001.json"), "utf-8"))
+        .resolves.toContain('"verdict": "pass"');
+
+      const committed = await runner.approveChapter(bookId, 1);
+      expect(committed.status).toBe("committed");
+      const head = await new ChapterCommitStore(bookDir).loadHead();
+      expect(head).toMatchObject({
+        chapter: 1,
+        status: "accepted",
+        validation: {
+          sceneRealizationPassed: true,
+          informationDramatizationPassed: true,
+          interactionChainPassed: true,
+          humanApprovalPassed: true,
+        },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a first chapter outside canon until approval and fully re-reviews author edits", async () => {
+    const { root, runner, state, bookId } = await createRunnerFixture({
+      inputGovernanceMode: "v2",
+      chapterApprovalMode: "human",
+    });
+    const bookDir = state.bookDir(bookId);
+    const original = [
+      "雨停后，林越把铜令推到守夜人面前。",
+      "守夜人翻开交接簿，缺页边缘还挂着半截红线。林越报出编号，他的手停在旧签名上。",
+      "巷口车轮一响，林越收起铜令追了出去。守夜人没有拦，只朝城门方向打了个手势。",
+    ].join("\n\n");
+    const edited = original.replace("城门方向", "东侧箭楼");
+    const writer = vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(
+      createWriterOutput({
+        chapterNumber: 1,
+        title: "雨后铜令",
+        content: original,
+        wordCount: original.length,
+      }),
+    );
+    vi.spyOn(ContinuityAuditor.prototype, "auditChapter").mockResolvedValue(createAuditResult({
+      passed: true,
+      issues: [],
+      summary: "clean",
+    }));
+    const analyzer = vi.spyOn(ChapterAnalyzerAgent.prototype, "analyzeChapter").mockResolvedValue(
+      createAnalyzedOutput({
+        chapterNumber: 1,
+        title: "雨后铜令",
+        content: edited,
+        wordCount: edited.length,
+      }),
+    );
+
+    try {
+      const drafted = await runner.writeDraft(bookId, "追查铜令失窃", 220);
+      expect(drafted).toMatchObject({
+        chapterNumber: 1,
+        status: "awaiting-human-approval",
+      });
+      expect(drafted.filePath).toBe(new ChapterApprovalStore(bookDir).draftPath(1));
+      expect((await readdir(join(bookDir, "chapters"))).filter((name) => name.endsWith(".md"))).toEqual([]);
+      await expect(new ChapterCommitStore(bookDir).loadHead()).resolves.toBeNull();
+
+      await runner.updatePendingChapterContent(bookId, 1, edited);
+      await expect(runner.approveChapter(bookId, 1)).rejects.toThrow(/reviewed again/i);
+
+      const reviewed = await runner.reviewPendingChapter(bookId, 1);
+      expect(reviewed.status).toBe("awaiting-human-approval");
+      expect(writer).toHaveBeenCalledTimes(1);
+      expect(analyzer).toHaveBeenCalledTimes(1);
+      const pending = await new ChapterApprovalStore(bookDir).load(1);
+      expect(pending?.record).toMatchObject({
+        lifecycleStatus: "awaiting-human-approval",
+        contentHash: sha256(edited),
+        reviewedContentHash: sha256(edited),
+      });
+      expect((await readdir(join(bookDir, "chapters"))).filter((name) => name.endsWith(".md"))).toEqual([]);
+      await expect(new ChapterCommitStore(bookDir).loadHead()).resolves.toBeNull();
+
+      const committed = await runner.approveChapter(bookId, 1);
+      expect(committed.status).toBe("committed");
+      expect((await new ChapterCommitStore(bookDir).loadHead())?.source.contentHash).toBe(sha256(edited));
+      expect((await readdir(join(bookDir, "chapters"))).some((name) => name.startsWith("0001_"))).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -119,8 +119,37 @@ function parseBookAndChapter(
     }
     return { bookIdArg: args[0], chapterNum: num };
   }
-  throw new Error("Usage: inoks-story review approve [book-id] <chapter>");
+  throw new Error("Usage: inoks-story review <action> [book-id] <chapter>");
 }
+
+reviewCommand
+  .command("rerun")
+  .description("Re-run all quality and canon gates for an edited pending chapter")
+  .argument("<args...>", "Book ID (optional) and chapter number")
+  .option("--json", "Output JSON")
+  .action(async (args: ReadonlyArray<string>, opts) => {
+    try {
+      const root = findProjectRoot();
+      const { bookIdArg, chapterNum } = parseBookAndChapter(args);
+      const bookId = await resolveBookId(bookIdArg, root);
+      const config = await loadConfig({ projectRoot: root, requireApiKey: false });
+      const pipeline = new PipelineRunner(buildPipelineConfig(config, root));
+      const result = await pipeline.reviewPendingChapter(bookId, chapterNum);
+
+      if (opts.json) {
+        log(JSON.stringify({ bookId, chapter: chapterNum, status: result.status }));
+      } else {
+        log(`Chapter ${chapterNum} passed re-review and is ${result.status}.`);
+      }
+    } catch (e) {
+      if (opts.json) {
+        log(JSON.stringify({ error: String(e) }));
+      } else {
+        logError(`Failed to re-review: ${e}`);
+      }
+      process.exit(1);
+    }
+  });
 
 reviewCommand
   .command("approve")

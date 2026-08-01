@@ -397,9 +397,17 @@ export interface DraftResult {
   readonly title: string;
   readonly wordCount: number;
   readonly filePath: string;
+  readonly status: ChapterPipelineResult["status"];
   readonly lengthWarnings?: ReadonlyArray<string>;
   readonly lengthTelemetry?: LengthTelemetry;
   readonly tokenUsage?: TokenUsageSummary;
+}
+
+interface PendingDraftReviewInput {
+  readonly chapterNumber: number;
+  readonly title: string;
+  readonly content: string;
+  readonly createdAt: string;
 }
 
 export interface PlanChapterResult {
@@ -1190,6 +1198,22 @@ export class PipelineRunner {
         undefined,
         context ?? this.config.externalContext,
       );
+      if (result.status === "awaiting-human-approval") {
+        const pending = await new ChapterApprovalStore(bookDir).load(result.chapterNumber);
+        if (!pending) {
+          throw new Error(`Reviewed draft ${result.chapterNumber} is missing from the approval store`);
+        }
+        return {
+          chapterNumber: result.chapterNumber,
+          title: result.title,
+          wordCount: result.wordCount,
+          filePath: pending.draftPath,
+          status: result.status,
+          lengthWarnings: result.lengthWarnings,
+          lengthTelemetry: result.lengthTelemetry,
+          tokenUsage: result.tokenUsage,
+        };
+      }
       const padded = String(result.chapterNumber).padStart(4, "0");
       const fileName = (await readdir(join(bookDir, "chapters")))
         .find((name) => name.startsWith(`${padded}_`) && name.endsWith(".md"));
@@ -1199,6 +1223,7 @@ export class PipelineRunner {
         title: result.title,
         wordCount: result.wordCount,
         filePath: join(bookDir, "chapters", fileName),
+        status: result.status,
         lengthWarnings: result.lengthWarnings,
         lengthTelemetry: result.lengthTelemetry,
         tokenUsage: result.tokenUsage,
@@ -2167,6 +2192,34 @@ export class PipelineRunner {
     }
   }
 
+  async reviewPendingChapter(bookId: string, chapterNumber: number): Promise<ChapterPipelineResult> {
+    const releaseLock = await this.state.acquireBookLock(bookId);
+    try {
+      const store = new ChapterApprovalStore(this.state.bookDir(bookId));
+      const pending = await store.load(chapterNumber);
+      if (!pending) throw new Error(`Pending chapter ${chapterNumber} was not found`);
+      if (pending.record.lifecycleStatus !== "human-editing") {
+        throw new Error(
+          `Chapter ${chapterNumber} is ${pending.record.lifecycleStatus}; only edited drafts require re-review`,
+        );
+      }
+      return await this._writeNextChapterLocked(
+        bookId,
+        pending.record.lengthTelemetry?.target,
+        undefined,
+        this.config.externalContext,
+        {
+          chapterNumber,
+          title: pending.record.title,
+          content: pending.content,
+          createdAt: pending.record.createdAt,
+        },
+      );
+    } finally {
+      await releaseLock();
+    }
+  }
+
   async updatePendingChapterContent(
     bookId: string,
     chapterNumber: number,
@@ -2250,13 +2303,14 @@ export class PipelineRunner {
     wordCount?: number,
     temperatureOverride?: number,
     externalContext?: string,
+    pendingDraftReview?: PendingDraftReviewInput,
   ): Promise<ChapterPipelineResult> {
     this.throwIfOperationAborted();
     await this.state.ensureControlDocuments(bookId);
     const book = await this.state.loadBookConfig(bookId);
     const bookDir = this.state.bookDir(bookId);
     await this.assertNoPendingStateRepair(bookId);
-    if (await new ChapterApprovalStore(bookDir).hasPending()) {
+    if (!pendingDraftReview && await new ChapterApprovalStore(bookDir).hasPending()) {
       throw new Error(
         `Book "${bookId}" has a reviewed chapter awaiting human action. Approve, edit and re-review, or reject it before writing another chapter.`,
       );
@@ -2272,7 +2326,8 @@ export class PipelineRunner {
         throw new Error(`Story System preflight failed: ${preflight.errors.join("; ")}`);
       }
     }
-    const chapterNumber = await this.state.getNextChapterNumber(bookId);
+    const chapterNumber = pendingDraftReview?.chapterNumber
+      ?? await this.state.getNextChapterNumber(bookId);
     const stageLanguage = await this.resolveBookLanguage(book);
     this.logStage(stageLanguage, { zh: "准备章节输入", en: "preparing chapter inputs" });
     const writeInput = await this.prepareWriteInput(
@@ -2307,16 +2362,18 @@ export class PipelineRunner {
     // 1. Write chapter
     const writer = new WriterAgent(this.agentCtxFor("writer", bookId));
     this.logStage(stageLanguage, { zh: "撰写章节草稿", en: "writing chapter draft" });
-    const output = await writer.writeChapter({
-      book,
-      bookDir,
-      chapterNumber,
-      ...writeInput,
-      lengthSpec,
-      ...(wordCount ? { wordCountOverride: wordCount } : {}),
-      ...(temperatureOverride ? { temperatureOverride } : {}),
-      deferSettlement: true,
-    });
+    const output = pendingDraftReview
+      ? buildPendingDraftWriterOutput(pendingDraftReview)
+      : await writer.writeChapter({
+          book,
+          bookDir,
+          chapterNumber,
+          ...writeInput,
+          lengthSpec,
+          ...(wordCount ? { wordCountOverride: wordCount } : {}),
+          ...(temperatureOverride ? { temperatureOverride } : {}),
+          deferSettlement: true,
+        });
     this.throwIfOperationAborted();
     const writerCount = countChapterLength(output.content, lengthSpec.countingMode);
 
@@ -2858,7 +2915,8 @@ export class PipelineRunner {
     });
     const commitStore = new ChapterCommitStore(bookDir);
     const parentCommit = await commitStore.loadHead();
-    const humanApprovalRequired = (this.config.chapterApprovalMode ?? "automatic") === "human";
+    const humanApprovalRequired = Boolean(pendingDraftReview)
+      || (this.config.chapterApprovalMode ?? "automatic") === "human";
     const temporalPassed = !auditResult.parseFailed
       && !auditResult.issues.some((issue) =>
         issue.severity === "critical"
@@ -2967,6 +3025,7 @@ export class PipelineRunner {
             degradedIssues,
             tokenUsage: totalUsage,
             proseQuality: proseQualityMeta,
+            createdAt: pendingDraftReview?.createdAt,
           },
         });
         const now = new Date().toISOString();
@@ -5320,4 +5379,25 @@ ${matrix}`,
     const contentStart = lines.findIndex((l, i) => i > 0 && l.trim().length > 0);
     return contentStart >= 0 ? lines.slice(contentStart).join("\n") : raw;
   }
+}
+
+function buildPendingDraftWriterOutput(input: PendingDraftReviewInput): WriteChapterOutput {
+  return {
+    chapterNumber: input.chapterNumber,
+    title: input.title,
+    content: input.content,
+    wordCount: input.content.replace(/\s+/g, "").length,
+    preWriteCheck: "human-edited pending draft",
+    postSettlement: "",
+    updatedState: "",
+    updatedLedger: "",
+    updatedHooks: "",
+    chapterSummary: "",
+    updatedSubplots: "",
+    updatedEmotionalArcs: "",
+    updatedCharacterMatrix: "",
+    postWriteErrors: [],
+    postWriteWarnings: [],
+    tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+  };
 }

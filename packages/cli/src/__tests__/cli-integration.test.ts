@@ -842,6 +842,9 @@ describe("CLI integration", () => {
         blockingCount: 0,
         extendedValidation: {
           storyConvergencePassed: true,
+          sceneRealizationPassed: true,
+          informationDramatizationPassed: true,
+          interactionChainPassed: true,
           humanFeelPassed: true,
           emotionPassed: true,
           payoffPassed: true,

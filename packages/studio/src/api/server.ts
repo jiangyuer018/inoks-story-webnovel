@@ -3239,10 +3239,17 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
 
     broadcast("draft:start", { bookId: id });
 
-    const pipeline = new PipelineRunner(await buildPipelineConfig());
+    const pipeline = new PipelineRunner(await buildPipelineConfig({ bookIdForSettings: id }));
     pipeline.writeDraft(id, body.context, body.wordCount).then(
       (result) => {
-        broadcast("draft:complete", { bookId: id, chapterNumber: result.chapterNumber, title: result.title, wordCount: result.wordCount });
+        broadcast("draft:complete", {
+          bookId: id,
+          chapterNumber: result.chapterNumber,
+          title: result.title,
+          wordCount: result.wordCount,
+          status: result.status,
+          filePath: result.filePath,
+        });
       },
       (e) => {
         broadcast("draft:error", { bookId: id, error: e instanceof Error ? e.message : String(e) });
@@ -3284,7 +3291,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     const id = c.req.param("id");
     const body = await c.req.json<{ context?: string }>().catch(() => ({ context: undefined }));
     try {
-      const pipeline = new PipelineRunner(await buildPipelineConfig());
+      const pipeline = new PipelineRunner(await buildPipelineConfig({ bookIdForSettings: id }));
       return c.json(await pipeline.planChapter(id, body.context));
     } catch (e) {
       return c.json({ error: String(e) }, 500);
@@ -3295,7 +3302,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
     const id = c.req.param("id");
     const body = await c.req.json<{ context?: string }>().catch(() => ({ context: undefined }));
     try {
-      const pipeline = new PipelineRunner(await buildPipelineConfig());
+      const pipeline = new PipelineRunner(await buildPipelineConfig({ bookIdForSettings: id }));
       return c.json(await pipeline.composeChapter(id, body.context));
     } catch (e) {
       return c.json({ error: String(e) }, 500);
@@ -3341,6 +3348,20 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string, o
       const pipeline = new PipelineRunner(await buildPipelineConfig({ bookIdForSettings: id }));
       const result = await pipeline.approveChapter(id, num);
       broadcast("chapter:approved", { bookId: id, chapterNumber: num, status: result.status });
+      return c.json({ ok: true, chapterNumber: num, status: result.status, result });
+    } catch (e) {
+      return c.json({ error: String(e) }, 500);
+    }
+  });
+
+  app.post("/api/v1/books/:id/chapters/:num/review", async (c) => {
+    const id = c.req.param("id");
+    const num = parseInt(c.req.param("num"), 10);
+
+    try {
+      const pipeline = new PipelineRunner(await buildPipelineConfig({ bookIdForSettings: id }));
+      const result = await pipeline.reviewPendingChapter(id, num);
+      broadcast("chapter:reviewed", { bookId: id, chapterNumber: num, status: result.status });
       return c.json({ ok: true, chapterNumber: num, status: result.status, result });
     } catch (e) {
       return c.json({ error: String(e) }, 500);

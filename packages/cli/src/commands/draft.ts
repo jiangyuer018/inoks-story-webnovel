@@ -30,6 +30,7 @@ export const draftCommand = new Command("draft")
       } else {
         log(`  Chapter ${result.chapterNumber}: ${result.title}`);
         log(`  Words: ${result.wordCount}`);
+        log(`  Status: ${result.status}`);
         log(`  File: ${result.filePath}`);
       }
     } catch (e) {

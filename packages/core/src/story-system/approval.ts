@@ -166,7 +166,7 @@ export class ChapterApprovalStore {
       if (!validationPassedExceptHumanApproval(params.record.commitDraft.validation)) {
         throw new Error("Pending approval contains unresolved non-human quality gates");
       }
-      if (params.record.commitDraft.validation.humanApprovalPassed !== false) {
+      if (params.record.commitDraft.validation.humanApprovalPassed === true) {
         throw new Error("Pending approval ChapterCommit must not already have human approval");
       }
     }
