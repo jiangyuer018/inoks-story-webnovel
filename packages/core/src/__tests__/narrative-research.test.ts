@@ -16,6 +16,7 @@ import {
   createDefaultEmotionTrajectory,
   detectMissingNarrativeLogic,
   extractNarrativeLogicNodes,
+  proposeOutlineRevisionFromCommit,
   selectRelevantHistory,
   selectWeightedContext,
   validateEventCausalGraph,
@@ -288,19 +289,31 @@ describe("Narrative Research Adaptation Layer", () => {
       bookDir,
       chapterNumber: 2,
     });
-    const store = new DynamicOutlineRevisionStore(bookDir);
-    const proposed = await store.propose({
-      bookId: "demo",
-      triggeredByCommitId: "commit-1",
-      affectedSpecIds: [spec.id],
-      proposedChanges: [{ specId: spec.id, field: "goal", oldValue: "A", newValue: "B" }],
-      reasons: ["关系发生变化"],
+    const commit = acceptedCommit(bookDir, 1, [candidate({
+      eventType: "relationship_changed",
+      subject: "林舟",
+      object: "赵横",
+      payload: { predicate: "relationship", oldValue: "互不信任", newValue: "暂时合作" },
+    })]);
+    const proposed = await proposeOutlineRevisionFromCommit({
+      bookDir,
+      commit,
+      futureSpecIds: [spec.id],
     });
-    expect(proposed.status).toBe("proposed");
-    const approved = await approveAndApplyOutlineRevision(bookDir, proposed.id);
+    expect(proposed?.status).toBe("proposed");
+    expect(proposed?.proposedChanges.some((change) => change.field === "staleReason")).toBe(false);
+    expect(proposed?.proposedChanges.some((change) => change.field === "hardConstraints")).toBe(true);
+    const approved = await approveAndApplyOutlineRevision(bookDir, proposed!.id);
     expect(approved.status).toBe("applied");
-    expect((await new StorySpecStore(bookDir).loadChapter(2))?.status).toBe("stale");
-    expect((await store.list())[0]?.triggeredByCommitId).toBe("commit-1");
+    const stale = await new StorySpecStore(bookDir).loadChapter(2);
+    expect(stale?.status).toBe("stale");
+    expect(stale?.hardConstraints.some((item) => item.includes("关系变化：林舟 → 赵横"))).toBe(true);
+
+    const replanned = await ensureChapterSpec({ bookId: "demo", bookDir, chapterNumber: 2 });
+    expect(replanned.status).toBe("awaiting-review");
+    expect(replanned.version).toBeGreaterThan(stale!.version);
+    expect(replanned.hardConstraints.some((item) => item.startsWith("正史承接："))).toBe(true);
+    expect((await new DynamicOutlineRevisionStore(bookDir).list())[0]?.triggeredByCommitId).toBe(commit.commitId);
   });
 
   it("keeps protected current facts even when their token cost exceeds the retrieval budget", () => {

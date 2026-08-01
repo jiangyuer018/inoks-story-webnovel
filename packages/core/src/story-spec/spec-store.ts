@@ -185,7 +185,9 @@ export async function ensureChapterSpec(input: EnsureChapterSpecInput): Promise<
     memo: input.memo ?? null,
   }));
   const current = await store.loadChapter(input.chapterNumber);
-  if (current?.sourceIntentHash === intentHash && current.status !== "superseded") {
+  if (current?.sourceIntentHash === intentHash
+    && current.status !== "superseded"
+    && current.status !== "stale") {
     const planning = input.blockOnPlaceholders ? detectStorySpecPlaceholders(current) : null;
     if (planning?.verdict !== "block" || !input.realize) {
       return maybeApprove(current, store, input);
@@ -194,9 +196,25 @@ export async function ensureChapterSpec(input: EnsureChapterSpecInput): Promise<
 
   const nextVersion = (current?.version ?? 0) + 1;
   const realization = input.realization ?? await input.realize?.();
-  const spec = buildChapterSpec(input, intentHash, nextVersion, realization);
+  const generated = buildChapterSpec(input, intentHash, nextVersion, realization);
+  const spec = current?.status === "stale"
+    ? carryForwardCanonRevision(generated, current)
+    : generated;
   const saved = await store.saveChapter(spec);
   return maybeApprove(saved, store, input);
+}
+
+function carryForwardCanonRevision(generated: ChapterSpec, stale: ChapterSpec): ChapterSpec {
+  const canonCriteria = stale.acceptanceCriteria.filter((criterion) => criterion.id.startsWith("canon-"));
+  return {
+    ...generated,
+    hardConstraints: unique([...generated.hardConstraints, ...stale.hardConstraints.filter((item) => item.startsWith("正史承接："))]),
+    plannedEvents: unique([...generated.plannedEvents, ...stale.plannedEvents.filter((item) => item.startsWith("承接既成事实："))]),
+    acceptanceCriteria: [
+      ...generated.acceptanceCriteria,
+      ...canonCriteria.filter((criterion) => !generated.acceptanceCriteria.some((item) => item.id === criterion.id)),
+    ],
+  };
 }
 
 async function maybeApprove(

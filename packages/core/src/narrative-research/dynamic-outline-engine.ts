@@ -4,6 +4,7 @@ import { canonicalJson, sha256 } from "../story-system/commit.js";
 import type { ChapterCommit } from "../story-system/types.js";
 import { storySpecRoot } from "../story-spec/constitution-loader.js";
 import { StorySpecStore } from "../story-spec/spec-store.js";
+import type { AcceptanceCriterion, ChapterSpec } from "../story-spec/types.js";
 import type { DynamicOutlineRevision, OutlineChange } from "./types.js";
 
 export class DynamicOutlineRevisionStore {
@@ -97,16 +98,39 @@ export async function proposeOutlineRevisionFromCommit(params: {
 }): Promise<DynamicOutlineRevision | null> {
   const signals = collectRevisionSignals(params.commit);
   if (signals.length === 0 || params.futureSpecIds.length === 0) return null;
+  const specs = await loadSpecsByIds(params.bookDir, params.futureSpecIds);
+  if (specs.length === 0) return null;
+  const canonConstraints = signals.map((signal) => `正史承接：${signal}；不得按变化前状态推进`);
+  const canonCriteria: AcceptanceCriterion[] = signals.map((signal, index) => ({
+    id: `canon-${params.commit.commitId.slice(-10)}-${index + 1}`,
+    description: `后续场景必须用行动、选择或后果承接：${signal}`,
+    severity: "blocking",
+    evidenceTerms: extractSignalTerms(signal),
+  }));
   return new DynamicOutlineRevisionStore(params.bookDir).propose({
     bookId: params.commit.bookId,
     triggeredByCommitId: params.commit.commitId,
-    affectedSpecIds: params.futureSpecIds,
-    proposedChanges: params.futureSpecIds.map((specId) => ({
-      specId,
-      field: "staleReason",
-      oldValue: null,
-      newValue: `Re-evaluate after ${params.commit.commitId}: ${signals.join("; ")}`,
-    })),
+    affectedSpecIds: specs.map((spec) => spec.id),
+    proposedChanges: specs.flatMap((spec) => ([
+      {
+        specId: spec.id,
+        field: "hardConstraints",
+        oldValue: spec.hardConstraints,
+        newValue: unique([...spec.hardConstraints, ...canonConstraints]),
+      },
+      {
+        specId: spec.id,
+        field: "plannedEvents",
+        oldValue: spec.plannedEvents,
+        newValue: unique([...spec.plannedEvents, ...signals.map((signal) => `承接既成事实：${signal}`)]),
+      },
+      {
+        specId: spec.id,
+        field: "acceptanceCriteria",
+        oldValue: spec.acceptanceCriteria,
+        newValue: uniqueById([...spec.acceptanceCriteria, ...canonCriteria]),
+      },
+    ])),
     reasons: signals,
     requiresHumanApproval: true,
   });
@@ -156,7 +180,18 @@ export async function approveAndApplyOutlineRevision(
   for (const specId of approved.affectedSpecIds) {
     const chapter = chaptersBySpecId.get(specId);
     if (!chapter) continue;
-    await store.markStale(chapter, approved.reasons.join("; ") || `Approved revision ${approved.id}`);
+    const currentSpec = await store.loadChapter(chapter);
+    if (!currentSpec) continue;
+    const changes = approved.proposedChanges.filter((change) => change.specId === specId);
+    const patched = applyOutlineChanges(currentSpec, changes);
+    await store.saveChapter({
+      ...patched,
+      version: currentSpec.version + 1,
+      status: "stale",
+      approvedAt: undefined,
+      approvedBy: undefined,
+      createdAt: new Date().toISOString(),
+    });
   }
   return revisions.markApplied(id);
 }
@@ -171,8 +206,64 @@ function collectRevisionSignals(commit: ChapterCommit): ReadonlyArray<string> {
   });
   const stateSignals = commit.stateDeltas
     .filter((delta) => /goal|strategy|目标|策略|关系|risk|风险/i.test(delta.predicate))
-    .map((delta) => `${delta.subject}.${delta.predicate} 已变化`);
+    .map((delta) => `${delta.subject}.${delta.predicate}：${canonicalJson(delta.oldValue)} → ${canonicalJson(delta.newValue)}`);
   return [...new Set([...eventSignals, ...stateSignals])];
+}
+
+async function loadSpecsByIds(
+  bookDir: string,
+  specIds: ReadonlyArray<string>,
+): Promise<ReadonlyArray<ChapterSpec>> {
+  const requested = new Set(specIds);
+  const raw = await readFile(join(storySpecRoot(bookDir), "HEAD"), "utf-8").catch(() => "");
+  if (!raw) return [];
+  const head = JSON.parse(raw) as { chapters?: Record<string, { id?: unknown }> };
+  const store = new StorySpecStore(bookDir);
+  const specs = await Promise.all(Object.entries(head.chapters ?? {})
+    .filter(([, value]) => typeof value.id === "string" && requested.has(value.id))
+    .map(([chapter]) => store.loadChapter(Number(chapter))));
+  return specs.filter((spec): spec is ChapterSpec => Boolean(spec));
+}
+
+function applyOutlineChanges(spec: ChapterSpec, changes: ReadonlyArray<OutlineChange>): ChapterSpec {
+  let next = spec;
+  for (const change of changes) {
+    if (change.field === "hardConstraints" && isStringArray(change.newValue)) {
+      next = { ...next, hardConstraints: unique(change.newValue) };
+    } else if (change.field === "plannedEvents" && isStringArray(change.newValue)) {
+      next = { ...next, plannedEvents: unique(change.newValue) };
+    } else if (change.field === "acceptanceCriteria" && Array.isArray(change.newValue)) {
+      const criteria = change.newValue.filter(isAcceptanceCriterion);
+      if (criteria.length === change.newValue.length) next = { ...next, acceptanceCriteria: uniqueById(criteria) };
+    }
+  }
+  return next;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string" && item.trim().length > 0);
+}
+
+function isAcceptanceCriterion(value: unknown): value is AcceptanceCriterion {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.id === "string"
+    && typeof item.description === "string"
+    && (item.severity === "blocking" || item.severity === "advisory")
+    && Array.isArray(item.evidenceTerms)
+    && item.evidenceTerms.every((term) => typeof term === "string" && term.trim().length > 0);
+}
+
+function extractSignalTerms(signal: string): string[] {
+  return unique(signal.match(/[\p{Script=Han}A-Za-z0-9_-]{2,}/gu) ?? []).slice(0, 8);
+}
+
+function unique(values: ReadonlyArray<string>): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function uniqueById<T extends { readonly id: string }>(values: ReadonlyArray<T>): T[] {
+  return [...new Map(values.map((value) => [value.id, value])).values()];
 }
 
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {

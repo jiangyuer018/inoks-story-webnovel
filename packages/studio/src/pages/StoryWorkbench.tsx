@@ -1073,6 +1073,21 @@ function OutlinePanel(props: PanelProps) {
             <p className="mt-3 text-xs text-muted-foreground">
               影响 {revision.affectedSpecIds.length} 个 Spec，包含 {revision.proposedChanges.length} 项修改。
             </p>
+            {revision.proposedChanges.length > 0 && (
+              <details className="mt-3 border border-border bg-muted/30 px-3 py-2">
+                <summary className="cursor-pointer text-sm font-medium">查看将写入后续 Story Spec 的实际变更</summary>
+                <div className="mt-3 space-y-3">
+                  {revision.proposedChanges.map((change, index) => (
+                    <div key={`${change.specId}:${change.field}:${index}`} className="border-l-2 border-primary pl-3">
+                      <p className="text-xs font-medium">
+                        {outlineFieldLabel(change.field)} · <code>{change.specId}</code>
+                      </p>
+                      <List values={formatOutlineChangeValue(change.newValue)} empty="无可应用内容" />
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
             {revision.status === "proposed" && (
               <div className="mt-4 flex gap-2">
                 <ActionButton
@@ -1108,6 +1123,34 @@ function OutlinePanel(props: PanelProps) {
       )}
     </section>
   );
+}
+
+function outlineFieldLabel(field: string): string {
+  if (field === "hardConstraints") return "正史硬约束";
+  if (field === "plannedEvents") return "后续计划事件";
+  if (field === "acceptanceCriteria") return "阻断验收条件";
+  return field;
+}
+
+function formatOutlineChangeValue(value: unknown): string[] {
+  if (!Array.isArray(value)) return [formatUnknown(value)];
+  return value.map((item) => {
+    if (typeof item === "string") return item;
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const record = item as Record<string, unknown>;
+      if (typeof record.description === "string") return record.description;
+    }
+    return formatUnknown(item);
+  });
+}
+
+function formatUnknown(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function BenchmarkPanel(props: PanelProps) {
